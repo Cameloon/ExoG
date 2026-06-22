@@ -1,0 +1,459 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ExoGuard / BioSteward — Editorial Dark Design System
+   All colors HSL. Investigative, institutional, serious.
+*/
+
+@layer base {
+  /*
+    ──────────────────────────────────────────────
+    LIGHT mode — default (clean #FBFBFB canvas)
+    Neutral near-white canvas, vivid #F25623 accent
+    (hue 15 / 89 % / 54 %). The orange-red primary
+    gives the institution a confident, modern signal
+    colour while staying government-grade legible on
+    a near-white surface. A faint warm grain keeps
+    the dossier texture without tinting the canvas.
+    ──────────────────────────────────────────────
+  */
+  :root {
+    /* Canvas — #FBFBFB clean near-white */
+    --background: 0 0% 98%;
+    --foreground: 0 0% 12%;
+
+    /*
+      Neutral hierarchy — six stops on pure-grey scale.
+       100 % → 99 % → 97 % → 96 % → 94 % → 90 %
+    */
+    --surface: 0 0% 99%;
+    --surface-elevated: 0 0% 100%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 12%;
+
+    /* Amber primary — same accent as dark mode, tuned for light-bg contrast */
+    --primary: 38 88% 56%;
+    --primary-foreground: 30 35% 9%;
+    --primary-glow: 42 95% 62%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 20%;
+
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 38%;
+
+    --accent: 38 88% 56%;
+    --accent-foreground: 30 35% 9%;
+
+    --destructive: 0 72% 46%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 145 52% 32%;
+    --warning: 32 85% 42%;
+    --info: 210 70% 42%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 38 88% 56%;
+
+    --radius: 0.75rem;
+
+    /* ── Gradients ── */
+
+    --gradient-hero:
+      radial-gradient(ellipse 80% 60% at 10% 0%, hsl(15 85% 92% / 0.28), transparent 55%),
+      radial-gradient(ellipse 40% 35% at 85% 5%, hsl(20 90% 94% / 0.16), transparent 45%),
+      radial-gradient(ellipse 60% 50% at 50% 0%, hsl(15 80% 90% / 0.1), transparent 60%),
+      linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(0 0% 98%) 100%);
+    --gradient-amber: linear-gradient(135deg, hsl(38 88% 56%), hsl(42 95% 62%));
+
+    /* Faint warm grain — barely warm ink, kept light so #FBFBFB stays clean */
+    --gradient-grain: radial-gradient(circle at 1px 1px, hsl(20 20% 20% / 0.025) 1px, transparent 0);
+
+    --gradient-surface: linear-gradient(160deg, hsl(0 0% 100%), hsl(0 0% 97%));
+
+    /* ── Shadows ── */
+
+    --shadow-elevated:
+      0 1px 2px hsl(0 0% 15% / 0.05),
+      0 4px 10px -4px hsl(0 0% 20% / 0.05),
+      0 12px 28px -8px hsl(0 0% 25% / 0.05),
+      0 28px 56px -16px hsl(0 0% 25% / 0.04);
+    --shadow-amber:
+      0 0 0 1px hsl(38 88% 56% / 0.15),
+      0 2px 8px -3px hsl(38 88% 56% / 0.22),
+      0 8px 24px -6px hsl(42 95% 60% / 0.26),
+      0 16px 48px -12px hsl(42 95% 62% / 0.2);
+    --shadow-inset:
+      inset 0 1px 0 0 hsl(0 0% 100% / 0.9),
+      inset 0 0 0 1px hsl(0 0% 100% / 0.5);
+    --shadow-glow: 0 0 40px -8px hsl(42 95% 60% / 0.25);
+
+    /* ── Type ── */
+    --font-display: 'Fraunces', ui-serif, Georgia, serif;
+    --font-editorial: 'Instrument Serif', ui-serif, Georgia, serif;
+    --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+    /* ── Motion ── */
+    --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+    /* ── Sidebar — clean white surface ── */
+    --sidebar-background: 0 0% 99%;
+    --sidebar-foreground: 0 0% 26%;
+    --sidebar-primary: 38 88% 56%;
+    --sidebar-primary-foreground: 30 35% 9%;
+    --sidebar-accent: 0 0% 96%;
+    --sidebar-accent-foreground: 0 0% 14%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-ring: 38 88% 56%;
+  }
+
+  /*
+    ──────────────────────────────────────────────
+    DARK mode — the original, editorial investigative look.
+    ──────────────────────────────────────────────
+  */
+  .dark {
+    --background: 30 8% 6%;
+    --foreground: 40 20% 92%;
+
+    --surface: 30 8% 8%;
+    --surface-elevated: 30 8% 11%;
+
+    --card: 30 8% 8%;
+    --card-foreground: 40 20% 92%;
+
+    --popover: 30 8% 9%;
+    --popover-foreground: 40 20% 92%;
+
+    /* Amber — single accent, used sparingly */
+    --primary: 38 88% 56%;
+    --primary-foreground: 30 10% 6%;
+    --primary-glow: 42 95% 62%;
+
+    --secondary: 30 6% 14%;
+    --secondary-foreground: 40 15% 88%;
+
+    --muted: 30 6% 12%;
+    --muted-foreground: 35 8% 58%;
+
+    --accent: 38 88% 56%;
+    --accent-foreground: 30 10% 6%;
+
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 40 20% 95%;
+
+    --success: 145 50% 45%;
+    --warning: 32 90% 55%;
+    --info: 200 70% 55%;
+
+    --border: 30 6% 16%;
+    --input: 30 6% 14%;
+    --ring: 38 88% 56%;
+
+    --radius: 0.25rem;
+
+    /* Gradients */
+    --gradient-hero: radial-gradient(ellipse at top, hsl(38 60% 18% / 0.45), transparent 60%),
+                     linear-gradient(180deg, hsl(30 8% 6%) 0%, hsl(30 8% 4%) 100%);
+    --gradient-amber: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-grain: radial-gradient(circle at 1px 1px, hsl(40 20% 92% / 0.04) 1px, transparent 0);
+
+    /* Shadows */
+    --shadow-elevated: 0 20px 60px -20px hsl(0 0% 0% / 0.6), 0 4px 12px -2px hsl(0 0% 0% / 0.4);
+    --shadow-amber: 0 0 0 1px hsl(var(--primary) / 0.2), 0 8px 30px -8px hsl(var(--primary) / 0.4);
+    --shadow-inset: inset 0 1px 0 0 hsl(40 20% 92% / 0.04);
+
+    /* Motion (shared with light — no visual theme impact) */
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+    --sidebar-background: 30 8% 7%;
+    --sidebar-foreground: 40 15% 80%;
+    --sidebar-primary: 38 88% 56%;
+    --sidebar-primary-foreground: 30 10% 6%;
+    --sidebar-accent: 30 6% 12%;
+    --sidebar-accent-foreground: 40 20% 92%;
+    --sidebar-border: 30 6% 14%;
+    --sidebar-ring: 38 88% 56%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-body);
+    font-feature-settings: 'ss01', 'cv11';
+    background-image: var(--gradient-grain);
+    background-size: 3px 3px;
+    transition:
+      background-color 0.6s var(--ease-out-soft),
+      color 0.4s var(--ease-out-soft),
+      box-shadow 0.3s var(--ease-out-soft);
+  }
+
+  /* View Transitions API — buttery crossfade on theme switch only.
+     No `navigation: auto` so route changes are never affected. */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.55s;
+    animation-timing-function: var(--ease-out-soft);
+  }
+  ::view-transition-old(root) { z-index: 1; }
+  ::view-transition-new(root) { z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    font-feature-settings: 'ss01';
+    letter-spacing: -0.02em;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.2);
+    color: hsl(var(--foreground));
+  }
+}
+
+@layer components {
+  .font-display { font-family: var(--font-display); }
+  .font-editorial { font-family: var(--font-editorial); letter-spacing: -0.015em; font-weight: 400; }
+  .font-mono { font-family: var(--font-mono); }
+
+  .text-balance { text-wrap: balance; }
+
+  .eyebrow {
+    @apply font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground;
+  }
+
+  .hairline {
+    @apply border-t border-border;
+  }
+
+  .grain::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: var(--gradient-grain);
+    background-size: 3px 3px;
+    pointer-events: none;
+    opacity: 0.6;
+  }
+
+  .glow-amber {
+    box-shadow: var(--shadow-amber);
+  }
+
+  .case-tag {
+    @apply font-mono text-[10px] uppercase tracking-widest px-2 py-1 border border-border bg-secondary text-muted-foreground;
+  }
+
+  /* Frosted glass surface — modern SaaS card aesthetic */
+  .glass {
+    background: hsl(var(--surface) / 0.6);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid hsl(var(--surface) / 0.35);
+    box-shadow: var(--shadow-elevated), var(--shadow-inset);
+    border-radius: var(--radius);
+    transition:
+      background 0.3s var(--ease-out-soft),
+      box-shadow 0.3s var(--ease-out-soft),
+      transform 0.3s var(--ease-out-soft);
+  }
+  .glass:hover {
+    background: hsl(var(--surface) / 0.8);
+    box-shadow: var(--shadow-elevated), var(--shadow-glow);
+    transform: translateY(-2px);
+  }
+
+  /* Glassy, layered surface — the SaaS hero card look */
+  .surface-card {
+    background: var(--gradient-surface);
+    box-shadow: var(--shadow-elevated), var(--shadow-inset);
+    backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid hsl(var(--surface) / 0.4);
+    border-radius: calc(var(--radius) + 0.25rem);
+    transition:
+      box-shadow 0.3s var(--ease-out-soft),
+      transform 0.3s var(--ease-out-soft);
+  }
+  .surface-card:hover {
+    box-shadow: var(--shadow-elevated), var(--shadow-glow);
+    transform: translateY(-1px);
+  }
+
+  /* Soft lavender ring glow (focus / hover flourish) */
+  .ring-primary-glow {
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.25), var(--shadow-glow);
+  }
+}
+
+@layer utilities {
+  .bg-hero { background: var(--gradient-hero); }
+  .bg-amber-gradient { background: var(--gradient-amber); }
+  .shadow-elevated { box-shadow: var(--shadow-elevated); }
+  .shadow-inset-hl { box-shadow: var(--shadow-inset); }
+
+  /* Subtle line scan animation for hero */
+  @keyframes scanline {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100%); }
+  }
+  .animate-scan { animation: scanline 8s linear infinite; }
+
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-up { animation: fade-up 0.8s var(--ease-out-soft) both; }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   LIGHT MODE OVERRIDES
+   Scoped to html:not(.dark) — never touches dark mode.
+   The amber accent (#eab308) is remapped to the #F25623 orange
+   primary, deepened for AA text legibility on the #FBFBFB canvas.
+   The near-black canvas (#09090B) is remapped to --surface,
+   preserving intentional rhythm between white default sections
+   and grey container sections.
+   ───────────────────────────────────────────────────────────── */
+
+html:not(.dark) {
+  /* Hero backdrop — layered orange-to-white gradient */
+  .hero-bg { background: var(--gradient-hero); }
+
+  /* ── Backgrounds: #09090B → neutral surface ── */
+  .bg-\[\#09090B\] { background-color: hsl(var(--surface)) !important; }
+  .bg-\[\#09090B\]\/60 { background-color: hsl(var(--surface) / 0.7) !important; }
+  .bg-\[\#09090B\]\/80 { background-color: hsl(var(--surface) / 0.85) !important; }
+
+  /* ── Text: white → foreground ink ── */
+  .text-white { color: hsl(var(--foreground)) !important; }
+  .text-white\/40 { color: hsl(var(--foreground) / 0.5) !important; }
+  .text-white\/50 { color: hsl(var(--foreground) / 0.62) !important; }
+  .text-white\/70 { color: hsl(var(--foreground) / 0.78) !important; }
+  .text-white\/80 { color: hsl(var(--foreground) / 0.85) !important; }
+  .text-white\/90 { color: hsl(var(--foreground) / 0.95) !important; }
+  .hover\:text-white:hover { color: hsl(var(--foreground)) !important; }
+
+/* ── Amber accent — vivid for fills, deepened for text (AA on white) ── */
+  /* Deep amber for text/labels: hsl(32 85% 32%) = 6:1 on #FBFBFB */
+  .text-\[\#eab308\] { color: hsl(32 85% 32%) !important; }
+  .text-\[\#eab308\]\/80 { color: hsl(32 80% 38%) !important; }
+  /* Vivid amber fills, dark ink text (AA for button text) */
+  .bg-\[\#eab308\] {
+    background-color: hsl(var(--primary)) !important;
+    color: hsl(var(--primary-foreground)) !important;
+  }
+  .hover\:bg-\[\#eab308\]\/90:hover {
+    background-color: hsl(var(--primary) / 0.9) !important;
+  }
+  .bg-\[\#eab308\]\/\[0\.07\] { background-color: hsl(38 88% 56% / 0.1) !important; }
+  .bg-\[\#eab308\]\/30 { background-color: hsl(var(--primary) / 0.4) !important; }
+  .border-\[\#eab308\]\/20 { border-color: hsl(var(--primary) / 0.3) !important; }
+
+  /* ── Text on accent buttons → dark ink ── */
+  .text-\[\#09090B\] { color: hsl(var(--primary-foreground)) !important; }
+
+  /* ── Borders & rings: white-fades → neutral border ── */
+  .border-white\/5 { border-color: hsl(var(--border) / 0.7) !important; }
+  .border-white\/10 { border-color: hsl(var(--border)) !important; }
+  .border-white\/15 { border-color: hsl(var(--primary) / 0.25) !important; }
+  .ring-white\/10 { --tw-ring-color: hsl(var(--border)) !important; }
+
+  /* ── Surfaces: dark "glass" → frosted neutral cards ── */
+  .bg-white\/\[0\.03\] {
+    background: hsl(var(--surface) / 0.65) !important;
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid hsl(var(--border) / 0.6);
+    box-shadow: var(--shadow-elevated);
+    border-radius: var(--radius) !important;
+  }
+  .hover\:bg-white\/\[0\.06\]:hover {
+    background: hsl(var(--surface) / 0.9) !important;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-elevated), var(--shadow-glow);
+  }
+  .hover\:bg-white\/\[0\.08\]:hover {
+    background: hsl(var(--surface) / 0.98) !important;
+  }
+
+  /* ── Status — deepened for AA legibility ── */
+  .text-green-400 { color: hsl(var(--success)) !important; }
+  .border-green-500\/20 { border-color: hsl(var(--success) / 0.3) !important; }
+  .border-green-500\/60 { border-color: hsl(var(--success) / 0.55) !important; }
+
+  /* ── Dashboard amber badges (Tailwind amber-*) → deep amber ── */
+  .text-amber-500 { color: hsl(32 85% 32%) !important; }
+  .border-amber-500\/50 { border-color: hsl(var(--primary) / 0.45) !important; }
+  .bg-amber-500\/20 { background-color: hsl(38 88% 56% / 0.14) !important; }
+
+  /* ── Toast reds (shadcn defaults) → destructive token ── */
+  .text-red-300 { color: hsl(var(--destructive)) !important; }
+  .text-red-50 { color: hsl(var(--destructive-foreground)) !important; }
+  .ring-red-400 { --tw-ring-color: hsl(var(--destructive)) !important; }
+  .ring-offset-red-600 { --tw-ring-offset-color: hsl(var(--background)) !important; }
+
+  /* ── Colored shadow → soft orange bloom ── */
+  .shadow-\[\#eab308\]\/5 { --tw-shadow-color: hsl(var(--primary) / 0.16) !important; }
+
+  /* ── Hero bottom fade → surface (matches sections below) ── */
+  .from-\[\#09090B\]\/70.to-\[\#09090B\] {
+    background-image: linear-gradient(
+      to bottom,
+      transparent,
+      hsl(var(--background) / 0.3) 60%,
+      hsl(var(--surface))
+    ) !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   DARK MODE — HERO ACCENT ALIGNMENT
+   Scoped to .dark — touches ONLY the hero. The hero's hardcoded
+   #eab308 (golden yellow) is remapped to --primary (amber) so the
+   hero accent matches the "Plattform ansehen" header button
+   (bg-primary). No other dark-mode styling is affected.
+   ───────────────────────────────────────────────────────────── */
+
+.dark {
+  .text-\[\#eab308\] { color: hsl(var(--primary)) !important; }
+  .text-\[\#eab308\]\/80 { color: hsl(var(--primary) / 0.85) !important; }
+  .bg-\[\#eab308\] {
+    background-color: hsl(var(--primary)) !important;
+    color: hsl(var(--primary-foreground)) !important;
+  }
+  .hover\:bg-\[\#eab308\]\/90:hover {
+    background-color: hsl(var(--primary) / 0.9) !important;
+  }
+  .bg-\[\#eab308\]\/\[0\.07\] { background-color: hsl(var(--primary) / 0.1) !important; }
+  .bg-\[\#eab308\]\/30 { background-color: hsl(var(--primary) / 0.35) !important; }
+  .border-\[\#eab308\]\/20 { border-color: hsl(var(--primary) / 0.3) !important; }
+}
