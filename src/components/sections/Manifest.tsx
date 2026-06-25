@@ -7,7 +7,7 @@ export const Manifest = () => {
   ];
 
   return (
-    <section id="manifest" className="relative border-t border-border bg-background">
+    <section id="manifest" className="relative border-t border-border bg-background-neutral dark:bg-background">
       <div className="container py-24 lg:py-32">
         <div className="grid gap-16 lg:grid-cols-12">
           <div className="lg:col-span-4">

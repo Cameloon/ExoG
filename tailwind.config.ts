@@ -22,11 +22,17 @@ export default {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
+        background: {
+          DEFAULT: "hsl(var(--background))",
+          neutral: "hsl(var(--background-neutral))",
+        },
         foreground: "hsl(var(--foreground))",
         surface: {
           DEFAULT: "hsl(var(--surface))",
           elevated: "hsl(var(--surface-elevated))",
+          warm: "hsl(var(--surface-warm))",
+          cool: "hsl(var(--surface-cool))",
+          "cool-deep": "hsl(var(--surface-cool-deep))",
         },
         primary: {
           DEFAULT: "hsl(var(--primary))",
@@ -56,6 +62,7 @@ export default {
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
+          neutral: "hsl(var(--card-neutral))",
         },
         success: "hsl(var(--success))",
         warning: "hsl(var(--warning))",

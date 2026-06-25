@@ -11,90 +11,104 @@
 @layer base {
   /*
     ──────────────────────────────────────────────
-    LIGHT mode — default (clean #FBFBFB canvas)
-    Neutral near-white canvas, vivid #F25623 accent
-    (hue 15 / 89 % / 54 %). The orange-red primary
-    gives the institution a confident, modern signal
-    colour while staying government-grade legible on
-    a near-white surface. A faint warm grain keeps
-    the dossier texture without tinting the canvas.
+    LIGHT mode — dual grey + dual white.
+    Warm white (default), neutral #FBFBFB (bg-background-neutral),
+    warm stone bands (bg-surface), cool neutral bands (#09090B).
     ──────────────────────────────────────────────
   */
   :root {
-    /* Canvas — #FBFBFB clean near-white */
-    --background: 0 0% 98%;
-    --foreground: 0 0% 12%;
-
     /*
-      Neutral hierarchy — six stops on pure-grey scale.
-       100 % → 99 % → 97 % → 96 % → 94 % → 90 %
+      Dual grey + dual white system:
+        • Whites  — warm near-white (default canvas) + neutral #FBFBFB
+        • Warm    — stone grey for bg-surface sections
+        • Cool    — previous neutral greys for dark-band remap
     */
-    --surface: 0 0% 99%;
-    --surface-elevated: 0 0% 100%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 12%;
+    /* Canvas — luminous warm white (default) */
+    --background: 40 28% 98%;
+    /* Previous neutral white — clean #FBFBFB (use bg-background-neutral) */
+    --background-neutral: 0 0% 98%;
+    --foreground: 28 22% 11%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 12%;
+    /* Warm stone grey — Sentinel, Legal, footer */
+    --surface-warm: 38 18% 95%;
+    --surface: 38 18% 95%;
 
-    /* Amber primary — same accent as dark mode, tuned for light-bg contrast */
-    --primary: 38 88% 56%;
-    --primary-foreground: 30 35% 9%;
-    --primary-glow: 42 95% 62%;
+    /* Previous neutral greys — System, CTA, page wrapper */
+    --surface-cool: 0 0% 96%;
+    --surface-cool-deep: 0 0% 93%;
 
+    /* Elevated — crisp warm white (keep) */
+    --surface-elevated: 40 30% 99%;
+
+    --card: 40 35% 99.5%;
+    --card-neutral: 0 0% 100%;
+    --card-foreground: 28 18% 12%;
+
+    --popover: 40 35% 99.5%;
+    --popover-neutral: 0 0% 100%;
+    --popover-foreground: 28 18% 12%;
+
+    /* Amber primary — confident institutional accent */
+    --primary: 32 92% 50%;
+    --primary-foreground: 28 40% 8%;
+    --primary-glow: 38 95% 58%;
+
+    /* Previous neutral fills */
     --secondary: 0 0% 96%;
     --secondary-foreground: 0 0% 20%;
 
     --muted: 0 0% 96%;
     --muted-foreground: 0 0% 38%;
 
-    --accent: 38 88% 56%;
-    --accent-foreground: 30 35% 9%;
+    --accent: 32 92% 50%;
+    --accent-foreground: 28 40% 8%;
 
     --destructive: 0 72% 46%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 145 52% 32%;
+    --success: 152 55% 30%;
     --warning: 32 85% 42%;
     --info: 210 70% 42%;
 
+    /* Previous neutral borders */
     --border: 0 0% 90%;
     --input: 0 0% 90%;
-    --ring: 38 88% 56%;
+    --ring: 32 92% 50%;
 
     --radius: 0.75rem;
 
     /* ── Gradients ── */
 
     --gradient-hero:
-      radial-gradient(ellipse 80% 60% at 10% 0%, hsl(15 85% 92% / 0.28), transparent 55%),
-      radial-gradient(ellipse 40% 35% at 85% 5%, hsl(20 90% 94% / 0.16), transparent 45%),
-      radial-gradient(ellipse 60% 50% at 50% 0%, hsl(15 80% 90% / 0.1), transparent 60%),
-      linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(0 0% 98%) 100%);
-    --gradient-amber: linear-gradient(135deg, hsl(38 88% 56%), hsl(42 95% 62%));
+      radial-gradient(ellipse 90% 70% at 8% -10%, hsl(32 90% 88% / 0.55), transparent 58%),
+      radial-gradient(ellipse 50% 45% at 92% 0%, hsl(38 85% 90% / 0.35), transparent 50%),
+      radial-gradient(ellipse 70% 55% at 50% 100%, hsl(0 0% 94% / 0.45), transparent 65%),
+      linear-gradient(180deg, hsl(40 28% 98%) 0%, hsl(38 18% 95%) 55%, hsl(0 0% 96%) 100%);
+    --gradient-amber: linear-gradient(135deg, hsl(32 92% 50%), hsl(38 95% 58%));
 
-    /* Faint warm grain — barely warm ink, kept light so #FBFBFB stays clean */
-    --gradient-grain: radial-gradient(circle at 1px 1px, hsl(20 20% 20% / 0.025) 1px, transparent 0);
+    /* Warm ink grain — barely visible texture */
+    --gradient-grain: radial-gradient(circle at 1px 1px, hsl(28 20% 30% / 0.018) 1px, transparent 0);
 
-    --gradient-surface: linear-gradient(160deg, hsl(0 0% 100%), hsl(0 0% 97%));
+    /* White card → previous neutral grey */
+    --gradient-surface: linear-gradient(165deg, hsl(40 35% 99.5%), hsl(0 0% 97%));
 
     /* ── Shadows ── */
 
     --shadow-elevated:
-      0 1px 2px hsl(0 0% 15% / 0.05),
-      0 4px 10px -4px hsl(0 0% 20% / 0.05),
-      0 12px 28px -8px hsl(0 0% 25% / 0.05),
-      0 28px 56px -16px hsl(0 0% 25% / 0.04);
+      0 1px 2px hsl(28 20% 20% / 0.04),
+      0 2px 6px -2px hsl(28 20% 25% / 0.06),
+      0 8px 20px -6px hsl(28 20% 25% / 0.07),
+      0 20px 48px -12px hsl(28 20% 25% / 0.08);
     --shadow-amber:
-      0 0 0 1px hsl(38 88% 56% / 0.15),
-      0 2px 8px -3px hsl(38 88% 56% / 0.22),
-      0 8px 24px -6px hsl(42 95% 60% / 0.26),
-      0 16px 48px -12px hsl(42 95% 62% / 0.2);
+      0 0 0 1px hsl(32 92% 50% / 0.18),
+      0 2px 8px -3px hsl(32 92% 50% / 0.24),
+      0 8px 24px -6px hsl(38 95% 55% / 0.28),
+      0 16px 48px -12px hsl(38 95% 58% / 0.18);
     --shadow-inset:
-      inset 0 1px 0 0 hsl(0 0% 100% / 0.9),
-      inset 0 0 0 1px hsl(0 0% 100% / 0.5);
-    --shadow-glow: 0 0 40px -8px hsl(42 95% 60% / 0.25);
+      inset 0 1px 0 0 hsl(0 0% 100% / 0.95),
+      inset 0 0 0 1px hsl(40 30% 99% / 0.6);
+    --shadow-glow: 0 0 48px -10px hsl(38 95% 55% / 0.28);
 
     /* ── Type ── */
     --font-display: 'Fraunces', ui-serif, Georgia, serif;
@@ -106,15 +120,15 @@
     --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
     --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
-    /* ── Sidebar — clean white surface ── */
+    /* ── Sidebar — previous neutral greys ── */
     --sidebar-background: 0 0% 99%;
     --sidebar-foreground: 0 0% 26%;
-    --sidebar-primary: 38 88% 56%;
-    --sidebar-primary-foreground: 30 35% 9%;
+    --sidebar-primary: 32 92% 50%;
+    --sidebar-primary-foreground: 28 40% 8%;
     --sidebar-accent: 0 0% 96%;
     --sidebar-accent-foreground: 0 0% 14%;
     --sidebar-border: 0 0% 90%;
-    --sidebar-ring: 38 88% 56%;
+    --sidebar-ring: 32 92% 50%;
   }
 
   /*
@@ -337,101 +351,163 @@
 /* ─────────────────────────────────────────────────────────────
    LIGHT MODE OVERRIDES
    Scoped to html:not(.dark) — never touches dark mode.
-   The amber accent (#eab308) is remapped to the #F25623 orange
-   primary, deepened for AA text legibility on the #FBFBFB canvas.
-   The near-black canvas (#09090B) is remapped to --surface,
-   preserving intentional rhythm between white default sections
-   and grey container sections.
+   Dual grey remap: #09090B → cool neutral bands; bg-surface
+   keeps warm stone. Cards stay on the new luminous white.
    ───────────────────────────────────────────────────────────── */
 
 html:not(.dark) {
-  /* Hero backdrop — layered orange-to-white gradient */
-  .hero-bg { background: var(--gradient-hero); }
+  /* Hero backdrop */
+  /* Hero — same clean neutral grey as #system section */
+  .hero-bg { background: hsl(var(--surface-cool-deep)); }
 
-  /* ── Backgrounds: #09090B → neutral surface ── */
-  .bg-\[\#09090B\] { background-color: hsl(var(--surface)) !important; }
-  .bg-\[\#09090B\]\/60 { background-color: hsl(var(--surface) / 0.7) !important; }
-  .bg-\[\#09090B\]\/80 { background-color: hsl(var(--surface) / 0.85) !important; }
+  /* PixelBlast — softer ambient glow on light canvas */
+  .hero-bg > .absolute.inset-0.z-0 {
+    opacity: 0.42;
+    filter: saturate(0.75) brightness(1.15);
+  }
 
-  /* ── Text: white → foreground ink ── */
+  /* Hero vignette — hidden in light mode (dark overlay stays in .dark) */
+  .hero-bg .bg-gradient-to-b { display: none !important; }
+
+  /* Demo/Dashboard — background #EDEDED, surface becomes warmer white for contrast */
+  .dashboard-bg { background: hsl(var(--surface-cool-deep)) !important; }
+  .dashboard-bg .bg-surface { background-color: hsl(var(--background-neutral)) !important; }
+  .dashboard-bg .bg-surface-elevated { background-color: hsl(var(--background)) !important; }
+  .dashboard-bg [class*="bg-background"]:not([class*="bg-background-"]) { background-color: hsl(var(--surface-cool-deep)) !important; }
+
+  /* ── Backgrounds: #09090B → previous cool neutral band ── */
+  .bg-\[\#09090B\] { background-color: hsl(var(--surface-cool-deep)) !important; }
+  .bg-\[\#09090B\]\/60 {
+    background-color: hsl(var(--card) / 0.88) !important;
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
+  }
+  .bg-\[\#09090B\]\/80 {
+    background-color: hsl(var(--card) / 0.96) !important;
+    box-shadow: var(--shadow-elevated);
+    border-color: hsl(var(--border)) !important;
+  }
+
+  /* ── Text: white → warm ink hierarchy ── */
   .text-white { color: hsl(var(--foreground)) !important; }
-  .text-white\/40 { color: hsl(var(--foreground) / 0.5) !important; }
-  .text-white\/50 { color: hsl(var(--foreground) / 0.62) !important; }
-  .text-white\/70 { color: hsl(var(--foreground) / 0.78) !important; }
-  .text-white\/80 { color: hsl(var(--foreground) / 0.85) !important; }
-  .text-white\/90 { color: hsl(var(--foreground) / 0.95) !important; }
+  .text-white\/40 { color: hsl(var(--muted-foreground)) !important; }
+  .text-white\/50 { color: hsl(var(--muted-foreground) / 0.9) !important; }
+  .text-white\/70 { color: hsl(var(--foreground) / 0.72) !important; }
+  .text-white\/80 { color: hsl(var(--foreground) / 0.82) !important; }
+  .text-white\/90 { color: hsl(var(--foreground) / 0.92) !important; }
   .hover\:text-white:hover { color: hsl(var(--foreground)) !important; }
 
-/* ── Amber accent — vivid for fills, deepened for text (AA on white) ── */
-  /* Deep amber for text/labels: hsl(32 85% 32%) = 6:1 on #FBFBFB */
-  .text-\[\#eab308\] { color: hsl(32 85% 32%) !important; }
-  .text-\[\#eab308\]\/80 { color: hsl(32 80% 38%) !important; }
-  /* Vivid amber fills, dark ink text (AA for button text) */
+  /* ── Amber accent — vivid fills, deep ink for text (AA) ── */
+  .text-\[\#eab308\] { color: hsl(28 75% 32%) !important; }
+  .text-\[\#eab308\]\/80 { color: hsl(28 70% 38%) !important; }
   .bg-\[\#eab308\] {
     background-color: hsl(var(--primary)) !important;
     color: hsl(var(--primary-foreground)) !important;
+    box-shadow: var(--shadow-amber);
   }
   .hover\:bg-\[\#eab308\]\/90:hover {
-    background-color: hsl(var(--primary) / 0.9) !important;
+    background-color: hsl(32 92% 46%) !important;
   }
-  .bg-\[\#eab308\]\/\[0\.07\] { background-color: hsl(38 88% 56% / 0.1) !important; }
-  .bg-\[\#eab308\]\/30 { background-color: hsl(var(--primary) / 0.4) !important; }
-  .border-\[\#eab308\]\/20 { border-color: hsl(var(--primary) / 0.3) !important; }
+  .bg-\[\#eab308\]\/\[0\.07\] {
+    background-color: hsl(32 92% 50% / 0.1) !important;
+    border-color: hsl(var(--primary) / 0.22) !important;
+  }
+  .bg-\[\#eab308\]\/30 { background-color: hsl(var(--primary) / 0.35) !important; }
+  .border-\[\#eab308\]\/20 { border-color: hsl(var(--primary) / 0.28) !important; }
 
   /* ── Text on accent buttons → dark ink ── */
   .text-\[\#09090B\] { color: hsl(var(--primary-foreground)) !important; }
 
-  /* ── Borders & rings: white-fades → neutral border ── */
-  .border-white\/5 { border-color: hsl(var(--border) / 0.7) !important; }
+  /* ── Borders & rings ── */
+  .border-white\/5 { border-color: hsl(var(--border) / 0.65) !important; }
   .border-white\/10 { border-color: hsl(var(--border)) !important; }
-  .border-white\/15 { border-color: hsl(var(--primary) / 0.25) !important; }
+  .border-white\/15 {
+    border-color: hsl(var(--border)) !important;
+    box-shadow: inset 0 1px 0 0 hsl(0 0% 100% / 0.7);
+  }
   .ring-white\/10 { --tw-ring-color: hsl(var(--border)) !important; }
 
-  /* ── Surfaces: dark "glass" → frosted neutral cards ── */
+  /* ── Surfaces: dark glass → crisp editorial cards ── */
   .bg-white\/\[0\.03\] {
-    background: hsl(var(--surface) / 0.65) !important;
-    backdrop-filter: blur(24px) saturate(160%);
-    -webkit-backdrop-filter: blur(24px) saturate(160%);
-    border: 1px solid hsl(var(--border) / 0.6);
-    box-shadow: var(--shadow-elevated);
+    background: hsl(var(--card)) !important;
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    border: 1px solid hsl(var(--border) / 0.9) !important;
+    box-shadow: var(--shadow-elevated), var(--shadow-inset);
     border-radius: var(--radius) !important;
   }
   .hover\:bg-white\/\[0\.06\]:hover {
-    background: hsl(var(--surface) / 0.9) !important;
+    background: hsl(var(--surface-elevated)) !important;
+    border-color: hsl(var(--primary) / 0.2) !important;
     transform: translateY(-2px);
     box-shadow: var(--shadow-elevated), var(--shadow-glow);
   }
   .hover\:bg-white\/\[0\.08\]:hover {
-    background: hsl(var(--surface) / 0.98) !important;
+    background: hsl(var(--surface-elevated)) !important;
+    border-color: hsl(var(--border)) !important;
   }
 
-  /* ── Status — deepened for AA legibility ── */
+  /* ── Status colours ── */
   .text-green-400 { color: hsl(var(--success)) !important; }
-  .border-green-500\/20 { border-color: hsl(var(--success) / 0.3) !important; }
-  .border-green-500\/60 { border-color: hsl(var(--success) / 0.55) !important; }
+  .border-green-500\/20 { border-color: hsl(var(--success) / 0.28) !important; }
+  .border-green-500\/60 { border-color: hsl(var(--success) / 0.5) !important; }
 
-  /* ── Dashboard amber badges (Tailwind amber-*) → deep amber ── */
-  .text-amber-500 { color: hsl(32 85% 32%) !important; }
-  .border-amber-500\/50 { border-color: hsl(var(--primary) / 0.45) !important; }
-  .bg-amber-500\/20 { background-color: hsl(38 88% 56% / 0.14) !important; }
+  /* ── Dashboard amber badges ── */
+  .text-amber-500 { color: hsl(28 75% 32%) !important; }
+  .border-amber-500\/50 { border-color: hsl(var(--primary) / 0.4) !important; }
+  .bg-amber-500\/20 { background-color: hsl(32 92% 50% / 0.12) !important; }
 
-  /* ── Toast reds (shadcn defaults) → destructive token ── */
+  /* ── Toast reds ── */
   .text-red-300 { color: hsl(var(--destructive)) !important; }
   .text-red-50 { color: hsl(var(--destructive-foreground)) !important; }
   .ring-red-400 { --tw-ring-color: hsl(var(--destructive)) !important; }
   .ring-offset-red-600 { --tw-ring-offset-color: hsl(var(--background)) !important; }
 
-  /* ── Colored shadow → soft orange bloom ── */
-  .shadow-\[\#eab308\]\/5 { --tw-shadow-color: hsl(var(--primary) / 0.16) !important; }
+  /* ── Hero evidence frame — neutral shadow only (no orange bloom) ── */
+  .hero-bg .shadow-\[\#eab308\]\/5 {
+    --tw-shadow-color: hsl(28 20% 25% / 0.08) !important;
+    box-shadow: var(--shadow-elevated) !important;
+  }
+  .hero-bg .shadow-2xl {
+    --tw-shadow-color: hsl(28 20% 25% / 0.08) !important;
+  }
 
-  /* ── Hero bottom fade → surface (matches sections below) ── */
-  .from-\[\#09090B\]\/70.to-\[\#09090B\] {
-    background-image: linear-gradient(
-      to bottom,
-      transparent,
-      hsl(var(--background) / 0.3) 60%,
-      hsl(var(--surface))
-    ) !important;
+
+
+  /* ── Component polish ── */
+  .glass {
+    background: hsl(var(--card) / 0.82);
+    border: 1px solid hsl(var(--border) / 0.85);
+    box-shadow: var(--shadow-elevated), var(--shadow-inset);
+  }
+  .glass:hover {
+    background: hsl(var(--card));
+    border-color: hsl(var(--primary) / 0.18);
+  }
+
+  .surface-card {
+    background: var(--gradient-surface);
+    border: 1px solid hsl(var(--border) / 0.9);
+    box-shadow: var(--shadow-elevated), var(--shadow-inset);
+  }
+
+  .case-tag {
+    background: hsl(var(--secondary));
+    border-color: hsl(var(--border));
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* Header — frosted warm bar */
+  header.sticky {
+    background: hsl(var(--background) / 0.82) !important;
+    border-color: hsl(var(--border) / 0.75) !important;
+    box-shadow: 0 1px 0 hsl(var(--border) / 0.4);
+  }
+
+  /* Selection */
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+    color: hsl(var(--foreground));
   }
 }
 

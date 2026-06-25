@@ -24,7 +24,7 @@ const Dashboard = () => {
   const current = roles.find((r) => r.id === role)!;
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground dashboard-bg">
       <SiteHeader />
 
       {/* Sub-nav: role switcher */}
