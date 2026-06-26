@@ -370,7 +370,7 @@ html:not(.dark) {
   .hero-bg .bg-gradient-to-b { display: none !important; }
 
   /* Demo/Dashboard — background #EDEDED, surface becomes warmer white for contrast */
-  .dashboard-bg { background: hsl(var(--surface-cool-deep)) !important; }
+  .dashboard-bg { background: #f5f5f5 !important; }
   .dashboard-bg .bg-surface { background-color: hsl(var(--background-neutral)) !important; }
   .dashboard-bg .bg-surface-elevated { background-color: hsl(var(--background)) !important; }
   .dashboard-bg [class*="bg-background"]:not([class*="bg-background-"]) { background-color: hsl(var(--surface-cool-deep)) !important; }
