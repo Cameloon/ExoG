@@ -358,7 +358,7 @@
 html:not(.dark) {
   /* Hero backdrop */
   /* Hero — same clean neutral grey as #system section */
-  .hero-bg { background: hsl(var(--surface-cool-deep)); }
+  .hero-bg { background: #f5f5f5; }
 
   /* PixelBlast — softer ambient glow on light canvas */
   .hero-bg > .absolute.inset-0.z-0 {
@@ -368,6 +368,10 @@ html:not(.dark) {
 
   /* Hero vignette — hidden in light mode (dark overlay stays in .dark) */
   .hero-bg .bg-gradient-to-b { display: none !important; }
+
+  /* Buttons & picture borders — square like the rest of dark mode's feel */
+  .hero-bg a, .hero-bg button { border-radius: 0 !important; }
+  .hero-bg .rounded-lg { border-radius: 0 !important; }
 
   /* Demo/Dashboard — background #EDEDED, surface becomes warmer white for contrast */
   .dashboard-bg { background: #f5f5f5 !important; }
