@@ -1,6 +1,6 @@
 import heroImg from "@/assets/hero-evidence.jpg";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, FileLock2 } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import PixelBlast from "@/components/backgrounds/PixelBlast";
 
@@ -44,13 +44,6 @@ export const Hero = () => {
         {/* Left — copy */}
         <div className="lg:col-span-7">
           <div className="animate-fade-up">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#eab308]/20 bg-[#eab308]/[0.07] px-4 py-1.5 backdrop-blur-sm">
-              <FileLock2 className="h-3 w-3 text-[#eab308]" />
-              <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#eab308]/80">
-                Geschlossenes Behördennetzwerk
-              </span>
-            </div>
-
             <h1 className="font-editorial mt-8 text-6xl leading-[0.98] tracking-tight text-balance md:text-7xl lg:text-[5.5rem]">
               Wenn ein Exot beschlagnahmt wird,<br className="hidden md:block" />
               <span className="text-white/40">beginnt das </span>

@@ -50,7 +50,15 @@ supabase link --project-ref YOUR_PROJECT_REF
 
 # deploy the function
 supabase functions deploy send-application-confirmation --no-verify-jwt
+supabase functions deploy kyc-upload --no-verify-jwt
+supabase functions deploy delete-account --no-verify-jwt
 ```
+
+The `delete-account` function needs two secrets set via
+`supabase secrets set`:
+
+- `CLERK_SECRET_KEY` — from Clerk → API Keys (server-side, keep secret)
+- `CLERK_DOMAIN` — e.g. `ideal-tetra-26.clerk.accounts.dev`
 
 ## 5. Fill in `src/config/external.ts`
 

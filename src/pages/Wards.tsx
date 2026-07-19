@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { safeExtension } from "@/lib/uploads";
 import { ShieldCheck, Lock, AlertTriangle, Plus, X, ImagePlus } from "lucide-react";
 
 type Ward = {
@@ -85,10 +86,11 @@ const statusLabel: Record<Ward["status"], string> = {
 };
 
 const Wards = () => {
-  const { user, isAdmin, loading: authLoading } = useAuth();
+  const { user, isAdmin, isEinrichtung, loading: authLoading } = useAuth();
   const supabase = useExternalSupabase();
   const storage = supabase.storage;
   const { toast } = useToast();
+  const [myShelterId, setMyShelterId] = useState<string | null>(null);
   const [access, setAccess] = useState<AccessState>({ kind: "loading" });
   const [wards, setWards] = useState<Ward[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -111,9 +113,22 @@ const Wards = () => {
   }, []);
 
   useEffect(() => {
+    if (!isEinrichtung || !user) {
+      setMyShelterId(null);
+      return;
+    }
+    supabase
+      .from("shelters")
+      .select("id")
+      .eq("owner_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => setMyShelterId((data as { id: string } | null)?.id ?? null));
+  }, [isEinrichtung, user, supabase]);
+
+  useEffect(() => {
     if (authLoading) return;
     if (!user) { setAccess({ kind: "anon" }); return; }
-    if (isAdmin) { setAccess({ kind: "approved" }); return; }
+    if (isAdmin || isEinrichtung) { setAccess({ kind: "approved" }); return; }
     supabase
       .from("sentinel_applications")
       .select("status")
@@ -127,7 +142,7 @@ const Wards = () => {
         if (data.status === "rejected") return setAccess({ kind: "rejected" });
         return setAccess({ kind: "pending" });
       });
-  }, [user, isAdmin, authLoading, supabase]);
+  }, [user, isAdmin, isEinrichtung, authLoading, supabase]);
 
   useEffect(() => {
     if (access.kind !== "approved" || !user) return;
@@ -211,7 +226,7 @@ const Wards = () => {
     // Upload new images first
     const uploadedPaths: string[] = [];
     for (const file of pendingImages) {
-      const ext = file.name.split(".").pop() ?? "jpg";
+      const ext = safeExtension(file);
       const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from("ward-images")
@@ -226,6 +241,7 @@ const Wards = () => {
 
     const payload = {
       owner_id: user.id,
+      shelter_id: isEinrichtung ? myShelterId : null,
       case_code: form.case_code.trim(),
       common_name: form.common_name.trim(),
       scientific_name: form.scientific_name.trim() || null,

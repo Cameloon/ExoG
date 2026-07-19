@@ -96,9 +96,12 @@ export function validateRationale(type: CareLog["type"], text: string): Validati
   };
 }
 
-// Deterministische Pseudo-Signatur (UI-Demo, keine Krypto).
+// Lokaler, nicht kryptografischer Fingerprint zur optischen Unterscheidung
+// von Einträgen. KEIN Beweismittel: client-seitig reproduzierbar, keine
+// Manipulationssicherheit (kein Server-Hash, keine Schlüsselbindung).
+// Für eine gerichtsfeste Kette muss die Signatur serverseitig erfolgen.
 export function sign(payload: string): string {
   let h = 0;
   for (let i = 0; i < payload.length; i++) h = (h * 31 + payload.charCodeAt(i)) >>> 0;
-  return `SIG-${h.toString(16).toUpperCase().padStart(8, "0").slice(0, 8)}`;
+  return `H-${h.toString(16).toUpperCase().padStart(8, "0").slice(0, 8)}`;
 }

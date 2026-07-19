@@ -8,7 +8,9 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
-import { CheckCircle2, ChevronRight, FileText, XCircle, Clock } from "lucide-react";
+import { CheckCircle2, ChevronRight, FileText, XCircle, Clock, Eye } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { HABITAT_CATEGORIES, parseCapacity, totalCapacity } from "@/lib/habitats";
 
 type Status = "pending" | "under_review" | "approved" | "rejected";
 
@@ -45,8 +47,13 @@ const Admin = () => {
   const [apps, setApps] = useState<Application[]>([]);
   const [selected, setSelected] = useState<Application | null>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
+  const [preview, setPreview] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [shelterReqs, setShelterReqs] = useState<
+    { id: string; user_id: string; email: string; display_name: string | null; status: string }[]
+  >([]);
+  const [shelterBusy, setShelterBusy] = useState(false);
 
   useEffect(() => {
     document.title = "Admin · BioSteward";
@@ -70,6 +77,40 @@ const Admin = () => {
     if (isAdmin) load();
   }, [isAdmin, load]);
 
+  const loadShelterReqs = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("pending_shelter_requests")
+      .select("id, user_id, email, display_name, status")
+      .order("created_at", { ascending: false });
+    if (error) {
+      toast({ title: "Load failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    setShelterReqs((data ?? []) as { id: string; user_id: string; email: string; display_name: string | null; status: string }[]);
+  }, [supabase]);
+
+  useEffect(() => {
+    if (isAdmin) void loadShelterReqs();
+  }, [isAdmin, loadShelterReqs]);
+
+  const decideShelter = async (id: string, status: "approved" | "rejected") => {
+    if (!user) return;
+    setShelterBusy(true);
+    try {
+      const { error } = await supabase
+        .from("pending_shelter_requests")
+        .update({ status, reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+        .eq("id", id);
+      if (error) throw error;
+      toast({ title: status === "approved" ? "Einrichtung bestätigt" : "Antrag abgelehnt" });
+      await loadShelterReqs();
+    } catch (e) {
+      toast({ title: "Update failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setShelterBusy(false);
+    }
+  };
+
   const openApp = async (app: Application) => {
     setSelected(app);
     setNotes(app.reviewer_notes ?? "");
@@ -80,7 +121,18 @@ const Admin = () => {
     setDocs((data ?? []) as DocRow[]);
   };
 
-  const openDoc = async (path: string) => {
+  const openDoc = async (path: string, fileName?: string) => {
+    const { data, error } = await supabase.storage
+      .from("kyc-documents")
+      .createSignedUrl(path, 60, { download: fileName ?? true });
+    if (error || !data) {
+      toast({ title: "Doc not accessible", variant: "destructive" });
+      return;
+    }
+    window.open(data.signedUrl, "_blank");
+  };
+
+  const previewDoc = async (path: string) => {
     const { data, error } = await supabase.storage
       .from("kyc-documents")
       .createSignedUrl(path, 60);
@@ -88,7 +140,7 @@ const Admin = () => {
       toast({ title: "Doc not accessible", variant: "destructive" });
       return;
     }
-    window.open(data.signedUrl, "_blank");
+    setPreview(data.signedUrl);
   };
 
   const setStatus = async (newStatus: Status) => {
@@ -147,7 +199,7 @@ const Admin = () => {
             Du bist eingeloggt, hast aber keine Admin-Rolle. Bitte einen bestehenden
             Admin, deinem Konto die Rolle zuzuweisen.
           </p>
-          <Button asChild className="mt-6"><Link to="/">Zur Startseite</Link></Button>
+          <Button asChild className="mt-6"><Link to="/start">Zur Startseite</Link></Button>
         </main>
       </div>
     );
@@ -160,6 +212,34 @@ const Admin = () => {
         <span className="eyebrow">§ Admin</span>
         <h1 className="font-editorial mt-4 text-4xl md:text-5xl">{t("admin.title")}</h1>
         <p className="mt-3 text-muted-foreground">{t("admin.subtitle")}</p>
+
+        {/* Shelter confirmation queue */}
+        <div className="mt-8 border border-border bg-surface p-6">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+            Einrichtungen · Bestätigung
+          </p>
+          {shelterReqs.length === 0 ? (
+            <p className="mt-3 text-sm text-muted-foreground">Keine offenen Anträge.</p>
+          ) : (
+            <ul className="mt-4 divide-y divide-border">
+              {shelterReqs.map((r) => (
+                <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-4">
+                  <div>
+                    <p className="text-sm font-medium">{r.display_name ?? r.email}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{r.email}</p>
+                    <span className="mt-1 inline-block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{r.status}</span>
+                  </div>
+                  {r.status === "pending" && (
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" disabled={shelterBusy} onClick={() => decideShelter(r.id, "approved")}>Bestätigen</Button>
+                      <Button size="sm" variant="ghost" disabled={shelterBusy} onClick={() => decideShelter(r.id, "rejected")}>Ablehnen</Button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
         {/* Filter */}
         <div className="mt-8 flex flex-wrap gap-2">
@@ -238,7 +318,19 @@ const Admin = () => {
                 <dl className="mt-6 space-y-3 text-sm">
                   <Row k="Erfahrung" v={`${selected.experience_years} Jahre`} />
                   <Row k="Spezies" v={selected.species_focus ?? "—"} />
-                  <Row k="Kapazität" v={selected.capacity} />
+                  <div>
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Kapazität je Lebensraum</dt>
+                    <dd className="mt-1 flex flex-wrap gap-2">
+                      {HABITAT_CATEGORIES.map((h) => (
+                        <span key={h.key} className="inline-flex items-center gap-1 border border-border px-2 py-1 text-xs">
+                          {h.label}<span className="font-semibold text-foreground">{parseCapacity(selected.capacity)[h.key]}</span>
+                        </span>
+                      ))}
+                      <span className="inline-flex items-center gap-1 border border-primary/40 bg-primary/10 px-2 py-1 text-xs">
+                        Gesamt<span className="font-semibold">{totalCapacity(parseCapacity(selected.capacity))}</span>
+                      </span>
+                    </dd>
+                  </div>
                   <Row k="KYC" v={selected.kyc_status} />
                 </dl>
 
@@ -254,16 +346,19 @@ const Admin = () => {
                   {docs.length === 0 ? (
                     <p className="mt-2 text-xs text-muted-foreground">—</p>
                   ) : (
-                    <ul className="mt-2 space-y-2">
+                    <ul className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
                       {docs.map((d) => (
-                        <li key={d.id}>
-                          <button onClick={() => openDoc(d.storage_path)}
-                            className="inline-flex items-center gap-2 border border-border bg-background px-3 py-2 text-xs hover:border-primary/50">
-                            <FileText className="h-3 w-3" />
-                            <span>{d.doc_type}</span>
-                            <span className="text-muted-foreground">· {d.file_name}</span>
-                            <span className="text-primary">{t("admin.viewDoc")}</span>
-                          </button>
+                        <li key={d.id} className="border border-border bg-background p-3">
+                          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{d.doc_type}</p>
+                          <p className="mt-1 truncate text-xs text-foreground/80">{d.file_name}</p>
+                          <div className="mt-2 flex gap-2">
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => previewDoc(d.storage_path)}>
+                              <Eye className="mr-1 h-3 w-3" /> {t("admin.viewDoc")}
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => openDoc(d.storage_path, d.file_name)}>
+                              <FileText className="mr-1 h-3 w-3" /> Download
+                            </Button>
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -290,6 +385,13 @@ const Admin = () => {
             )}
           </div>
         </div>
+
+        <Dialog open={preview !== null} onOpenChange={(o) => !o && setPreview(null)}>
+          <DialogContent className="max-w-3xl bg-background p-2">
+            <DialogTitle className="sr-only">Dokumentenvorschau</DialogTitle>
+            {preview && <img src={preview} alt="Dokumentenvorschau" className="max-h-[80vh] w-full object-contain" />}
+          </DialogContent>
+        </Dialog>
       </main>
       <SiteFooter />
     </div>

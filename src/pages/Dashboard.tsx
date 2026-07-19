@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { SiteHeader } from "@/components/SiteHeader";
 import { Button } from "@/components/ui/button";
-import { Building2, PawPrint, ShieldCheck } from "lucide-react";
+import { Building2, PawPrint, ShieldCheck, Landmark } from "lucide-react";
 import { AuthorityView } from "@/components/dashboard/AuthorityView";
 import { SentinelView } from "@/components/dashboard/SentinelView";
 import { AdminView } from "@/components/dashboard/AdminView";
 
-type Role = "authority" | "sentinel" | "admin";
+type Role = "authority" | "sentinel" | "admin" | "behoerde" | "einrichtung";
 
-const roles: { id: Role; label: string; sub: string; icon: typeof Building2 }[] = [
-  { id: "authority", label: "Behörde", sub: "VetA München · BY-Süd", icon: Building2 },
+const roles: { id: Role; label: string; sub: string; icon: typeof Building2; real?: string }[] = [
+  { id: "authority", label: "Behörde (Demo)", sub: "VetA München · BY-Süd", icon: Building2 },
   { id: "sentinel", label: "Sentinel", sub: "Dr. K. Hoffmann · S4", icon: PawPrint },
   { id: "admin", label: "ExoGuard Admin", sub: "Zertifizierungs-Review", icon: ShieldCheck },
+  { id: "behoerde", label: "Behörde (Live)", sub: "Einzugsgebiet · Region", icon: Landmark, real: "/behoerde" },
+  { id: "einrichtung", label: "Einrichtung (Live)", sub: "Tierheim / Shelter", icon: Building2, real: "/shelters" },
 ];
 
 const Dashboard = () => {
@@ -70,6 +73,20 @@ const Dashboard = () => {
         {role === "authority" && <AuthorityView />}
         {role === "sentinel" && <SentinelView />}
         {role === "admin" && <AdminView />}
+        {(role === "behoerde" || role === "einrichtung") && (
+          <div className="rounded border border-border bg-surface p-10 text-center">
+            <p className="font-display text-2xl">{current.label}</p>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Diese Ansicht ist die reale, rollen- und regionsgebundene App. Sie ist
+              nur mit dem passenden Clerk-Rollen-Metadatum erreichbar.
+            </p>
+            {current.real && (
+              <Button asChild className="mt-6">
+                <Link to={current.real}>Zur Live-Ansicht</Link>
+              </Button>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );

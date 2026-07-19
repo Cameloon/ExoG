@@ -11,19 +11,38 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 export const SiteHeader = () => {
   const { t } = useTranslation();
   const location = useLocation();
-  const onDashboard = location.pathname.startsWith("/dashboard");
-  const { user, isAdmin, signOut } = useAuth();
+  const { user, isAdmin, isBehoerde, isEinrichtung, role, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const nav = [
+  // Logged-out: public landing/marketing nav. Logged-in: role-based app nav
+  // (replaces the landing links, like a normal web-app). Logo still → home.
+  const publicNav = [
     { href: "/sentinel", label: t("nav.sentinel"), type: "route" as const },
     { href: "/pledge", label: t("nav.pledge"), type: "route" as const },
     { href: "/werte", label: t("nav.werte"), type: "route" as const },
     { href: "/wards", label: "Wards", type: "route" as const },
     { href: "/#system", label: t("nav.system"), type: "anchor" as const },
     { href: "/#workflow", label: t("nav.workflow"), type: "anchor" as const },
-    ...(isAdmin ? [{ href: "/admin", label: t("nav.admin"), type: "route" as const }] : []),
   ];
+
+  const appNav = [
+    ...(isBehoerde ? [{ href: "/behoerde", label: "Behörde", type: "route" as const }] : []),
+    ...(isEinrichtung ? [
+      { href: "/shelters", label: "Einrichtung", type: "route" as const },
+      { href: "/wards", label: "Wards", type: "route" as const },
+    ] : []),
+    ...(role === "sentinel" ? [
+      { href: "/sentinel/network", label: "Netzwerk", type: "route" as const },
+      { href: "/wards", label: "Wards", type: "route" as const },
+    ] : []),
+    ...(user && role !== "sentinel" && role !== "admin" ? [
+      { href: "/sentinel/apply", label: "Registrierung", type: "route" as const },
+    ] : []),
+    ...(isAdmin ? [{ href: "/admin", label: t("nav.admin"), type: "route" as const }] : []),
+    ...(user ? [{ href: "/account", label: t("nav.account"), type: "route" as const }] : []),
+  ];
+
+  const nav = user ? appNav : publicNav;
 
   const closeMobile = () => setMobileOpen(false);
 
@@ -31,39 +50,33 @@ export const SiteHeader = () => {
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
       <div className="container flex h-16 items-center justify-between">
         <Logo />
-        {!onDashboard && (
-          <nav className="hidden items-center gap-7 md:flex">
-            {nav.map((n) =>
-              n.type === "route" ? (
-                <Link key={n.href} to={n.href}
-                  className={`font-mono text-xs uppercase tracking-[0.18em] transition-colors hover:text-foreground ${
-                    location.pathname === n.href ? "text-primary" : "text-muted-foreground"
-                  }`}>
-                  {n.label}
-                </Link>
-              ) : (
-                <a key={n.href} href={n.href}
-                  className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:text-foreground">
-                  {n.label}
-                </a>
-              ),
-            )}
-          </nav>
-        )}
+        <nav className="hidden items-center gap-7 md:flex">
+          {nav.map((n) =>
+            n.type === "route" ? (
+              <Link key={n.href} to={n.href}
+                className={`font-mono text-xs uppercase tracking-[0.18em] transition-colors hover:text-foreground ${
+                  location.pathname === n.href ? "text-primary" : "text-muted-foreground"
+                }`}>
+                {n.label}
+              </Link>
+            ) : (
+              <a key={n.href} href={n.href}
+                className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:text-foreground">
+                {n.label}
+              </a>
+            ),
+          )}
+        </nav>
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          {onDashboard ? (
-            <Button asChild variant="ghost" size="sm">
-              <Link to="/">{t("nav.backHome")}</Link>
-            </Button>
-          ) : user ? (
+          {user ? (
             <Button variant="ghost" size="sm" onClick={() => signOut()}>{t("nav.signOut")}</Button>
           ) : (
             <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex">
               <Link to="/auth">{t("nav.signIn")}</Link>
             </Button>
           )}
-          {!onDashboard && (
+          {!user && (
             <Button asChild variant="default" size="sm" className="hidden sm:inline-flex">
               <Link to="/dashboard">{t("nav.viewPlatform")}</Link>
             </Button>
@@ -91,49 +104,7 @@ export const SiteHeader = () => {
 
           {/* Primary CTA — full-width on mobile */}
           <div className="border-b border-border p-4">
-            {onDashboard ? (
-              <Button asChild variant="ghost" className="w-full" onClick={closeMobile}>
-                <Link to="/">{t("nav.backHome")}</Link>
-              </Button>
-            ) : (
-              <Button asChild variant="default" className="w-full" onClick={closeMobile}>
-                <Link to="/dashboard">{t("nav.viewPlatform")}</Link>
-              </Button>
-            )}
-          </div>
-
-          {/* Nav links */}
-          {!onDashboard && (
-            <nav className="flex flex-col py-2">
-              {nav.map((n) =>
-                n.type === "route" ? (
-                  <Link
-                    key={n.href}
-                    to={n.href}
-                    onClick={closeMobile}
-                    className={`border-b border-border/60 px-6 py-4 font-mono text-xs uppercase tracking-[0.18em] transition-colors hover:bg-surface-elevated hover:text-foreground ${
-                      location.pathname === n.href ? "text-primary" : "text-muted-foreground"
-                    }`}
-                  >
-                    {n.label}
-                  </Link>
-                ) : (
-                  <a
-                    key={n.href}
-                    href={n.href}
-                    onClick={closeMobile}
-                    className="border-b border-border/60 px-6 py-4 font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:bg-surface-elevated hover:text-foreground"
-                  >
-                    {n.label}
-                  </a>
-                ),
-              )}
-            </nav>
-          )}
-
-          {/* Auth action pinned to bottom */}
-          <div className="mt-auto border-t border-border p-4">
-            {onDashboard ? null : user ? (
+            {user ? (
               <Button
                 variant="outline"
                 className="w-full"
@@ -145,6 +116,42 @@ export const SiteHeader = () => {
                 {t("nav.signOut")}
               </Button>
             ) : (
+              <Button asChild variant="default" className="w-full" onClick={closeMobile}>
+                <Link to="/dashboard">{t("nav.viewPlatform")}</Link>
+              </Button>
+            )}
+          </div>
+
+          {/* Nav links */}
+          <nav className="flex flex-col py-2">
+            {nav.map((n) =>
+              n.type === "route" ? (
+                <Link
+                  key={n.href}
+                  to={n.href}
+                  onClick={closeMobile}
+                  className={`border-b border-border/60 px-6 py-4 font-mono text-xs uppercase tracking-[0.18em] transition-colors hover:bg-surface-elevated hover:text-foreground ${
+                    location.pathname === n.href ? "text-primary" : "text-muted-foreground"
+                  }`}
+                >
+                  {n.label}
+                </Link>
+              ) : (
+                <a
+                  key={n.href}
+                  href={n.href}
+                  onClick={closeMobile}
+                  className="border-b border-border/60 px-6 py-4 font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:bg-surface-elevated hover:text-foreground"
+                >
+                  {n.label}
+                </a>
+              ),
+            )}
+          </nav>
+
+          {/* Auth action pinned to bottom */}
+          <div className="mt-auto border-t border-border p-4">
+            {!user && (
               <Button asChild variant="outline" className="w-full">
                 <Link to="/auth" onClick={closeMobile}>{t("nav.signIn")}</Link>
               </Button>

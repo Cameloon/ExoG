@@ -467,7 +467,7 @@ export const SentinelView = () => {
 
                 <div className="mt-4 flex items-center justify-between">
                   <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                    <Fingerprint className="h-3 w-3" /> Auto-Signatur · {ME_SENTINEL.name}
+                    <Fingerprint className="h-3 w-3" /> Lokal-Hash · {ME_SENTINEL.name}
                   </span>
                   <Button size="sm" onClick={addLog} disabled={!note.trim() || !validation.ok}>
                     <Plus className="mr-2 h-4 w-4" /> Eintragen & signieren

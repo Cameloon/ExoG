@@ -14,6 +14,7 @@ const de = {
     backHome: "← Zur Startseite",
     signIn: "Anmelden",
     signOut: "Abmelden",
+    account: "Konto",
   },
   auth: {
     title: "Zugang zum Custody-Netzwerk",
@@ -40,6 +41,7 @@ const de = {
         "Lade Ausweisdokumente und (optional) ein Foto deiner Halteanlage hoch. Dateien werden verschlüsselt gespeichert und sind ausschließlich für verifizierte Prüfer:innen einsichtig.",
       idFront: "Ausweis Vorderseite",
       idBack: "Ausweis Rückseite",
+      selfie: "Gesichtsbild (Identitätsabgleich)",
       facility: "Foto Halteanlage (optional)",
       uploaded: "Hochgeladen",
       required: "Beide Ausweisseiten sind erforderlich.",
@@ -72,6 +74,17 @@ const de = {
     documents: "Dokumente",
     viewDoc: "Öffnen",
     forbidden: "Kein Zugriff. Diese Seite ist Admins vorbehalten.",
+  },
+  account: {
+    required: "Bitte melde dich an, um dein Konto zu verwalten.",
+    title: "Konto",
+    danger: "Gefahrenbereich",
+    deleteHint: "Löscht alle deine Daten (Profil, Bewerbungen, KYC-Dokumente) unwiderruflich gemäß DSGVO Art. 17.",
+    deleteConfirm: "Wirklich unwiderruflich löschen? Alle deine Daten werden entfernt.",
+    delete: "Konto löschen",
+    deleting: "Wird gelöscht…",
+    deleted: "Konto gelöscht.",
+    deleteError: "Löschen fehlgeschlagen. Bitte erneut versuchen.",
   },
 };
 

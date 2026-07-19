@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { Navigate } from "react-router-dom";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Hero } from "@/components/sections/Hero";
@@ -8,9 +10,18 @@ import { Manifest } from "@/components/sections/Manifest";
 import { Workflow } from "@/components/sections/Workflow";
 import { Legal } from "@/components/sections/Legal";
 import { CTA } from "@/components/sections/CTA";
-import { useEffect } from "react";
+import { useAuth } from "@/hooks/useAuth";
 
-const Index = () => {
+// Logged-in users are sent straight into the web app (role home); the
+// marketing page is only shown when logged out or via /start.
+const roleHome: Record<string, string> = {
+  behoerde: "/behoerde",
+  einrichtung: "/shelters",
+  admin: "/admin",
+  sentinel: "/sentinel/network",
+};
+
+export const Landing = () => {
   useEffect(() => {
     document.title = "ExoGuard · Custody-Infrastruktur für beschlagnahmte Exoten";
     const meta = document.querySelector('meta[name="description"]');
@@ -41,6 +52,19 @@ const Index = () => {
       <SiteFooter />
     </div>
   );
+};
+
+const Index = () => {
+  const { user, role, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background text-muted-foreground flex items-center justify-center">
+        …
+      </div>
+    );
+  }
+  if (user) return <Navigate to={roleHome[role] ?? "/dashboard"} replace />;
+  return <Landing />;
 };
 
 export default Index;

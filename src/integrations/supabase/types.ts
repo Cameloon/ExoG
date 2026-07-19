@@ -264,6 +264,7 @@ export type Database = {
           origin_context: string | null
           owner_id: string
           region: string | null
+          shelter_id: string | null
           scientific_name: string | null
           sex: string | null
           size_estimate: string | null
@@ -285,6 +286,7 @@ export type Database = {
           origin_context?: string | null
           owner_id: string
           region?: string | null
+          shelter_id?: string | null
           scientific_name?: string | null
           sex?: string | null
           size_estimate?: string | null
@@ -306,6 +308,7 @@ export type Database = {
           origin_context?: string | null
           owner_id?: string
           region?: string | null
+          shelter_id?: string | null
           scientific_name?: string | null
           sex?: string | null
           size_estimate?: string | null
@@ -314,6 +317,131 @@ export type Database = {
           updated_at?: string
           urgency?: string
           visibility?: Database["public"]["Enums"]["ward_visibility"]
+        }
+        Relationships: []
+      }
+      shelters: {
+        Row: {
+          id: string
+          owner_id: string
+          name: string
+          kind: Database["public"]["Enums"]["user_kind"]
+          region: string
+          address: string | null
+          lat: number | null
+          lng: number | null
+          contact_email: string | null
+          contact_phone: string | null
+          description: string | null
+          capacity_notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          owner_id: string
+          name: string
+          kind?: Database["public"]["Enums"]["user_kind"]
+          region: string
+          address?: string | null
+          lat?: number | null
+          lng?: number | null
+          contact_email?: string | null
+          contact_phone?: string | null
+          description?: string | null
+          capacity_notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          owner_id?: string
+          name?: string
+          kind?: Database["public"]["Enums"]["user_kind"]
+          region?: string
+          address?: string | null
+          lat?: number | null
+          lng?: number | null
+          contact_email?: string | null
+          contact_phone?: string | null
+          description?: string | null
+          capacity_notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      sentinel_shelter_requests: {
+        Row: {
+          id: string
+          shelter_id: string
+          sentinel_id: string
+          message: string | null
+          status: Database["public"]["Enums"]["shelter_request_status"]
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          shelter_id: string
+          sentinel_id: string
+          message?: string | null
+          status?: Database["public"]["Enums"]["shelter_request_status"]
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          shelter_id?: string
+          sentinel_id?: string
+          message?: string | null
+          status?: Database["public"]["Enums"]["shelter_request_status"]
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sentinel_shelter_requests_shelter_id_fkey"
+            columns: ["shelter_id"]
+            isOneToOne: false
+            referencedRelation: "shelters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pending_shelter_requests: {
+        Row: {
+          id: string
+          user_id: string
+          email: string
+          display_name: string | null
+          status: Database["public"]["Enums"]["shelter_approval_status"]
+          reviewed_by: string | null
+          reviewed_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          email: string
+          display_name?: string | null
+          status?: Database["public"]["Enums"]["shelter_approval_status"]
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          email?: string
+          display_name?: string | null
+          status?: Database["public"]["Enums"]["shelter_approval_status"]
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -334,6 +462,9 @@ export type Database = {
     Enums: {
       app_role: "admin" | "moderator" | "user"
       application_status: "pending" | "under_review" | "approved" | "rejected"
+      user_kind: "sentinel" | "shelter" | "gov"
+      shelter_request_status: "open" | "accepted" | "declined" | "withdrawn"
+      shelter_approval_status: "pending" | "approved" | "rejected"
       kyc_status: "not_started" | "documents_uploaded" | "verified" | "rejected"
       ward_interest_status:
         | "open"

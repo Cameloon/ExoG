@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Logo } from "./Logo";
 
 export const SiteFooter = () => (
@@ -32,10 +33,10 @@ export const SiteFooter = () => (
         <div>
           <h4 className="eyebrow mb-4">Rechtliches</h4>
           <ul className="space-y-2 text-sm text-muted-foreground">
-            <li><a href="#" className="hover:text-foreground">Datenschutz</a></li>
-            <li><a href="#" className="hover:text-foreground">Impressum</a></li>
+            <li><Link to="/datenschutz" className="hover:text-foreground">Datenschutz</Link></li>
+            <li><Link to="/impressum" className="hover:text-foreground">Impressum</Link></li>
             <li><a href="#" className="hover:text-foreground">Sicherheit</a></li>
-            <li><a href="#" className="hover:text-foreground">DSGVO-Auftragsverarbeitung</a></li>
+            <li><Link to="/datenschutz" className="hover:text-foreground">DSGVO-Auftragsverarbeitung</Link></li>
           </ul>
         </div>
       </div>
