@@ -29,13 +29,15 @@ export const SiteHeader = () => {
     ...(isBehoerde ? [{ href: "/behoerde", label: "Behörde", type: "route" as const }] : []),
     ...(isEinrichtung ? [
       { href: "/shelters", label: "Einrichtung", type: "route" as const },
+      { href: "/care", label: "Pflege", type: "route" as const },
       { href: "/wards", label: "Wards", type: "route" as const },
     ] : []),
     ...(role === "sentinel" ? [
+      { href: "/care", label: "Pflege", type: "route" as const },
       { href: "/sentinel/network", label: "Netzwerk", type: "route" as const },
       { href: "/wards", label: "Wards", type: "route" as const },
     ] : []),
-    ...(user && role !== "sentinel" && role !== "admin" ? [
+    ...(role === "user" ? [
       { href: "/sentinel/apply", label: "Registrierung", type: "route" as const },
     ] : []),
     ...(isAdmin ? [{ href: "/admin", label: t("nav.admin"), type: "route" as const }] : []),
@@ -78,7 +80,7 @@ export const SiteHeader = () => {
           )}
           {!user && (
             <Button asChild variant="default" size="sm" className="hidden sm:inline-flex">
-              <Link to="/dashboard">{t("nav.viewPlatform")}</Link>
+                <Link to="/demo">{t("nav.viewPlatform")}</Link>
             </Button>
           )}
           {/* Mobile menu trigger */}
@@ -117,7 +119,7 @@ export const SiteHeader = () => {
               </Button>
             ) : (
               <Button asChild variant="default" className="w-full" onClick={closeMobile}>
-                <Link to="/dashboard">{t("nav.viewPlatform")}</Link>
+              <Link to="/demo">{t("nav.viewPlatform")}</Link>
               </Button>
             )}
           </div>

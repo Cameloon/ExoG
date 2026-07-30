@@ -30,7 +30,7 @@ const SentinelOnboarding = () => {
         <CheckCircle2 className="mx-auto h-10 w-10 text-primary" />
         <h2 className="font-editorial mt-5 text-3xl">Bereits im Netzwerk.</h2>
         <p className="mt-3 text-muted-foreground">Dein Konto ist bestätigt — die Bewerbung ist für dich nicht nötig.</p>
-        <Link to="/dashboard" className="mt-6 inline-block font-mono text-[10px] uppercase tracking-[0.22em] text-primary hover:underline">Zum Netzwerk →</Link>
+        <Link to="/care" className="mt-6 inline-block font-mono text-[10px] uppercase tracking-[0.22em] text-primary hover:underline">Zum Pflege-Log →</Link>
       </div>
     );
   }
@@ -41,7 +41,7 @@ const SentinelOnboarding = () => {
         <CheckCircle2 className="mx-auto h-10 w-10 text-primary" />
         <h2 className="font-editorial mt-5 text-3xl">Du bist Sentinel.</h2>
         <p className="mt-3 text-muted-foreground">Deine Aufnahme ist bestätigt. Alles Weitere findest du im Netzwerk-Bereich.</p>
-        <Link to="/dashboard" className="mt-6 inline-block font-mono text-[10px] uppercase tracking-[0.22em] text-primary hover:underline">Zum Netzwerk →</Link>
+        <Link to="/care" className="mt-6 inline-block font-mono text-[10px] uppercase tracking-[0.22em] text-primary hover:underline">Zum Pflege-Log →</Link>
       </div>
     );
   }

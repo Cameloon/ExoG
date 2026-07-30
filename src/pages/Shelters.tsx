@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { PawPrint, Network, Building2, Check, X } from "lucide-react";
+import { PawPrint, Network, Building2, Check, X, ChevronDown } from "lucide-react";
 import { WardManager } from "@/components/wards/WardManager";
 import { RegionSelect } from "@/components/RegionSelect";
 import {
@@ -19,10 +19,23 @@ import {
   fetchRequestsForShelter,
   setRequestStatus,
 } from "@/lib/shelters";
+import { parseCapacity, totalCapacity } from "@/lib/habitats";
 import type { Shelter, Ward, ShelterRequest } from "@/lib/types";
 import { BUNDESLAENDER } from "@/lib/germanRegions";
 
 type Tab = "profil" | "tiere" | "netzwerk";
+
+type ApplicantApp = {
+  full_name: string;
+  email: string;
+  region: string;
+  experience_years: number;
+  species_focus: string | null;
+  capacity: string;
+  motivation: string;
+  status: string;
+  created_at: string;
+};
 
 const Shelters = () => {
   const { user, isEinrichtung, loading } = useAuth();
@@ -32,10 +45,34 @@ const Shelters = () => {
   const [shelter, setShelter] = useState<Shelter | null>(null);
   const [wards, setWards] = useState<Ward[]>([]);
   const [requests, setRequests] = useState<ShelterRequest[]>([]);
+  const [applicants, setApplicants] = useState<Record<string, ApplicantApp>>({});
+  const [expandedReq, setExpandedReq] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [editing, setEditing] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<"pending" | "rejected" | null>(null);
-  const [myShelterId, setMyShelterId] = useState<string | null>(null);
+  const [requesting, setRequesting] = useState(false);
+
+  // Self-service request — covers OAuth signups (no pending row is written on
+  // the OAuth redirect path) and users who signed up without choosing a role.
+  const requestAccess = async () => {
+    if (!user) return;
+    setRequesting(true);
+    const { error } = await supabase.from("pending_shelter_requests").upsert({
+      user_id: user.id,
+      email: user.email ?? "",
+      display_name: user.displayName ?? null,
+      status: "pending",
+    });
+    setRequesting(false);
+    if (error) {
+      toast({ title: "Antrag fehlgeschlagen", description: error.message, variant: "destructive" });
+      return;
+    }
+    setPendingStatus("pending");
+    toast({ title: "Antrag übermittelt", description: "Ein Admin bestätigt deine Einrichtung." });
+  };
+  // Derived from the shelter row load() already fetches — no second query.
+  const myShelterId = shelter?.id ?? null;
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -50,6 +87,20 @@ const Shelters = () => {
         ]);
         setWards(w);
         setRequests(r);
+        // Klarname + Profil der Bewerber (RLS 00017: shelter reads its applicants)
+        const ids = [...new Set(r.map((x) => x.sentinel_id))];
+        if (ids.length > 0) {
+          const { data } = await supabase
+            .from("sentinel_applications")
+            .select("user_id, full_name, email, region, experience_years, species_focus, capacity, motivation, status, created_at")
+            .in("user_id", ids)
+            .order("created_at", { ascending: false });
+          const map: Record<string, ApplicantApp> = {};
+          for (const a of (data ?? []) as (ApplicantApp & { user_id: string })[]) {
+            if (!map[a.user_id]) map[a.user_id] = a; // latest application per user
+          }
+          setApplicants(map);
+        }
       }
     } catch (e) {
       toast({ title: "Laden fehlgeschlagen", description: (e as Error).message, variant: "destructive" });
@@ -65,16 +116,6 @@ const Shelters = () => {
   useEffect(() => {
     if (isEinrichtung && user) void load();
   }, [isEinrichtung, user, load]);
-
-  useEffect(() => {
-    if (!isEinrichtung || !user) return;
-    supabase
-      .from("shelters")
-      .select("id")
-      .eq("owner_id", user.id)
-      .maybeSingle()
-      .then(({ data }) => setMyShelterId((data as { id: string } | null)?.id ?? null));
-  }, [isEinrichtung, user, supabase]);
 
   // If the user signed up as a shelter but the admin hasn't confirmed yet,
   // surface the pending/rejected state instead of a generic "no access".
@@ -136,11 +177,14 @@ const Shelters = () => {
       <div className="min-h-screen bg-background text-foreground">
         <SiteHeader />
         <main className="container max-w-xl py-24 text-center">
-          <h1 className="font-editorial text-3xl">Kein Einrichtungs-Zugang</h1>
+          <h1 className="font-editorial text-3xl">Als Einrichtung registrieren</h1>
           <p className="mt-4 text-sm text-muted-foreground">
-            Dieser Bereich ist Tierheimen / Einrichtungen vorbehalten.
+            Dieser Bereich ist Tierheimen / Notstationen / Einrichtungen vorbehalten.
+            Beantrage den Zugang — ein Admin bestätigt deine Einrichtung, ohne KYC-Prozess.
           </p>
-          <Button asChild className="mt-6"><Link to="/start">Zur Startseite</Link></Button>
+          <Button className="mt-6" disabled={requesting} onClick={requestAccess}>
+            {requesting ? "Sende …" : "Zugang als Einrichtung beantragen"}
+          </Button>
         </main>
       </div>
     );
@@ -234,21 +278,62 @@ const Shelters = () => {
                   <p className="mt-4 text-sm text-muted-foreground">Noch keine Anfragen von Sentinels.</p>
                 ) : (
                   <ul className="mt-4 divide-y divide-border border border-border bg-surface">
-                    {requests.map((r) => (
-                      <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-                        <div>
-                          <p className="text-sm">Sentinel <span className="font-mono">{r.sentinel_id.slice(0, 12)}…</span></p>
-                          {r.message && <p className="mt-1 text-xs text-muted-foreground">{r.message}</p>}
-                          <span className="mt-1 inline-block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{r.status}</span>
-                        </div>
-                        {r.status === "open" && (
-                          <div className="flex gap-2">
-                            <Button size="sm" variant="outline" onClick={() => respond(r.id, "accepted")}><Check className="mr-1 h-3 w-3" /> Annehmen</Button>
-                            <Button size="sm" variant="ghost" onClick={() => respond(r.id, "declined")}><X className="mr-1 h-3 w-3" /> Ablehnen</Button>
+                    {requests.map((r) => {
+                      const app = applicants[r.sentinel_id];
+                      const expanded = expandedReq === r.id;
+                      return (
+                        <li key={r.id} className="px-5 py-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <button
+                                onClick={() => setExpandedReq(expanded ? null : r.id)}
+                                className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-primary"
+                              >
+                                {app?.full_name ?? "Bewerber:in"}
+                                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                              </button>
+                              {app && (
+                                <p className="mt-0.5 text-xs text-muted-foreground">
+                                  {app.region} · {app.experience_years} Jahre Erfahrung
+                                  {app.status === "approved" && (
+                                    <span className="ml-2 font-mono text-[10px] uppercase tracking-[0.18em] text-primary">✓ vetted</span>
+                                  )}
+                                </p>
+                              )}
+                              {r.message && <p className="mt-1 text-xs text-muted-foreground">{r.message}</p>}
+                              <span className="mt-1 inline-block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{r.status}</span>
+                            </div>
+                            {r.status === "open" && (
+                              <div className="flex gap-2">
+                                <Button size="sm" variant="outline" onClick={() => respond(r.id, "accepted")}><Check className="mr-1 h-3 w-3" /> Annehmen</Button>
+                                <Button size="sm" variant="ghost" onClick={() => respond(r.id, "declined")}><X className="mr-1 h-3 w-3" /> Ablehnen</Button>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </li>
-                    ))}
+                          {expanded && app && (
+                            <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 text-xs">
+                              <Meta label="Klarname" value={app.full_name} />
+                              <Meta label="Kontakt" value={app.email} />
+                              <Meta label="Region" value={app.region} />
+                              <Meta label="Erfahrung" value={`${app.experience_years} Jahre`} />
+                              <Meta label="Spezies-Fokus" value={app.species_focus ?? "—"} />
+                              <Meta label="Kapazität gesamt" value={String(totalCapacity(parseCapacity(app.capacity)))} />
+                              <Meta label="Bewerbung" value={new Date(app.created_at).toLocaleDateString("de-DE")} />
+                              <Meta label="Status" value={app.status} />
+                              <div className="col-span-2">
+                                <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Motivation</span>
+                                <p className="mt-1 whitespace-pre-wrap text-foreground/85">{app.motivation}</p>
+                              </div>
+                            </dl>
+                          )}
+                          {expanded && !app && (
+                            <p className="mt-4 border-t border-border pt-4 text-xs text-muted-foreground">
+                              Keine Bewerbungsdaten gefunden (Bewerber:in ohne Sentinel-Antrag).
+                            </p>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </section>
@@ -331,9 +416,19 @@ const ShelterProfileForm = ({
 
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
         const regionValue = district ? `${district}, ${state}` : state;
+        // ponytail: auto-geocode address via Nominatim on save
+        let glat = lat, glng = lng;
+        if (!glat && !glng) {
+          const q = [address, district, state].filter(Boolean).join(", ");
+          if (q) try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`);
+            const data = await res.json() as { lat: string; lon: string }[];
+            if (data[0]) { glat = data[0].lat; glng = data[0].lon; }
+          } catch { /* geocode silent fail */ }
+        }
         onSave({
           name,
           region: regionValue,
@@ -341,8 +436,8 @@ const ShelterProfileForm = ({
           contact_email: contactEmail || null,
           contact_phone: contactPhone || null,
           description: description || null,
-          lat: lat ? Number(lat) : null,
-          lng: lng ? Number(lng) : null,
+          lat: glat ? Number(glat) : null,
+          lng: glng ? Number(glng) : null,
         });
       }}
       className="grid gap-5 border border-border bg-surface p-8 md:grid-cols-2"
@@ -357,10 +452,6 @@ const ShelterProfileForm = ({
       <Field label="Adresse" value={address} onChange={setAddress} />
       <Field label="Kontakt-E-Mail" value={contactEmail} onChange={setContactEmail} />
       <Field label="Telefon" value={contactPhone} onChange={setContactPhone} />
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Breitengrad (lat)" value={lat} onChange={setLat} />
-        <Field label="Längengrad (lng)" value={lng} onChange={setLng} />
-      </div>
       <div className="md:col-span-2">
         <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Beschreibung</Label>
         <Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className="mt-2" />
@@ -377,6 +468,13 @@ const Field = ({ label, value, onChange }: { label: string; value: string; onCha
   <div>
     <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{label}</Label>
     <Input value={value} onChange={(e) => onChange(e.target.value)} className="mt-2" />
+  </div>
+);
+
+const Meta = ({ label, value }: { label: string; value: string }) => (
+  <div>
+    <dt className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{label}</dt>
+    <dd className="mt-1 text-foreground/85">{value}</dd>
   </div>
 );
 

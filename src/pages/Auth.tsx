@@ -26,14 +26,6 @@ const getClerkErrorMessage = (err: unknown) => {
   );
 };
 
-// Only allow same-origin, relative in-app paths. Rejects absolute URLs,
-// protocol-relative "//host" redirects, and any host-bearing target.
-const safeRedirect = (target: string | undefined): string => {
-  if (!target) return "/dashboard";
-  if (target.startsWith("/") && !target.startsWith("//")) return target;
-  return "/dashboard";
-};
-
 const splitDisplayName = (name: string) => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length <= 1) return { firstName: parts[0] ?? undefined, lastName: undefined };
@@ -63,7 +55,6 @@ const Auth = () => {
   // Self-service role choice at signup: sentinel (→ KYC application) or
   // shelter (→ admin confirmation, no KYC).
   const [intendedRole, setIntendedRole] = useState<"sentinel" | "shelter">("sentinel");
-  const redirectTo = safeRedirect((location.state as { from?: string } | null)?.from);
 
   useEffect(() => {
     document.title = "Anmelden · BioSteward";
@@ -83,7 +74,7 @@ const Auth = () => {
     ? (homeForRole[role] ?? "/dashboard")
     : intendedRole === "sentinel"
       ? "/sentinel/apply"
-      : redirectTo;
+      : "/shelters";
 
   useEffect(() => {
     if (!loading && user) {

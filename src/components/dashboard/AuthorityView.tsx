@@ -1,18 +1,13 @@
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import {
   AlertTriangle,
-  CheckCircle2,
   ChevronRight,
   Clock,
   FileText,
   MapPin,
   ShieldCheck,
-  Truck,
   User2,
   Activity,
-  Search,
-  Filter,
   FileSignature,
   ClipboardList,
 } from "lucide-react";
@@ -86,14 +81,6 @@ export const AuthorityView = () => {
         <section className="lg:col-span-7">
           <div className="flex items-center justify-between">
             <h2 className="text-xl tracking-tight">Aktive Akten</h2>
-            <div className="flex items-center gap-2">
-              <button className="flex h-8 items-center gap-2 border border-border bg-surface px-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground">
-                <Search className="h-3 w-3" /> Suche
-              </button>
-              <button className="flex h-8 items-center gap-2 border border-border bg-surface px-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground">
-                <Filter className="h-3 w-3" /> Filter
-              </button>
-            </div>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-px bg-border">
@@ -309,15 +296,6 @@ export const AuthorityView = () => {
                 </div>
               </div>
             )}
-
-            <div className="grid grid-cols-2 gap-px border-t border-border bg-border">
-              <Button variant="ghost" className="rounded-none bg-surface hover:bg-surface-elevated">
-                <Truck className="mr-2 h-4 w-4" /> Transport
-              </Button>
-              <Button className="rounded-none">
-                <CheckCircle2 className="mr-2 h-4 w-4" /> Vermitteln
-              </Button>
-            </div>
           </div>
         </aside>
       </div>

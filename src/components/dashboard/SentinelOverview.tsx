@@ -28,13 +28,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  ACTIVITY_7D,
-  CASES,
-  DUTIES,
-  ME_SENTINEL,
+  type CaseRecord,
   type Duty,
   type DutyPriority,
+  type SentinelProfile,
 } from "@/lib/dashboard-data";
+import { formatDue } from "@/lib/duties";
 
 type DutyCategory = Duty["category"];
 const CATEGORIES: DutyCategory[] = [
@@ -56,25 +55,6 @@ const PRIO_WEIGHT: Record<DutyPriority, number> = {
   kritisch: 0,
   hoch: 1,
   normal: 2,
-};
-
-const formatDue = (iso: string): string => {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "Heute · spontan";
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  const tomorrow = new Date(now);
-  tomorrow.setDate(now.getDate() + 1);
-  const isTomorrow = d.toDateString() === tomorrow.toDateString();
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  const isYesterday = d.toDateString() === yesterday.toDateString();
-  const time = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-  if (isYesterday) return `Gestern · ${time}`;
-  if (sameDay) return `Heute · ${time}`;
-  if (isTomorrow) return `Morgen · ${time}`;
-  const date = d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
-  return `${date} · ${time}`;
 };
 
 const defaultDueIso = (): string => {
@@ -100,11 +80,17 @@ const ENCLOSURE_TONE: Record<string, string> = {
 };
 
 interface Props {
+  sentinel: SentinelProfile;
+  cases: CaseRecord[];
+  activity: { day: string; logs: number }[];
+  duties: Duty[];
+  onToggleDuty: (id: string, done: boolean) => void;
+  onAddDuty: (d: { title: string; caseId?: string; dueIso: string; priority: DutyPriority; category: Duty["category"] }) => void;
   onJumpToCase: (id: string) => void;
+  live?: boolean;
 }
 
-export const SentinelOverview = ({ onJumpToCase }: Props) => {
-  const [duties, setDuties] = useState<Duty[]>(DUTIES);
+export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDuty, onAddDuty, onJumpToCase, live = false }: Props) => {
   const [newDuty, setNewDuty] = useState("");
   const [newCategory, setNewCategory] = useState<DutyCategory>("Klima");
   const [newPriority, setNewPriority] = useState<DutyPriority>("normal");
@@ -147,38 +133,33 @@ export const SentinelOverview = ({ onJumpToCase }: Props) => {
 
   const enclosureBreakdown = useMemo(() => {
     const map = new Map<string, { total: number; belegt: number }>();
-    ME_SENTINEL.enclosures.forEach((e) => {
+    sentinel.enclosures.forEach((e) => {
       const cur = map.get(e.type) ?? { total: 0, belegt: 0 };
       cur.total += 1;
       if (e.status === "belegt") cur.belegt += 1;
       map.set(e.type, cur);
     });
     return Array.from(map.entries());
-  }, []);
+  }, [sentinel.enclosures]);
 
-  const maxLogs = Math.max(...ACTIVITY_7D.map((a) => a.logs));
-  const totalLogs = ACTIVITY_7D.reduce((s, a) => s + a.logs, 0);
+  const maxLogs = Math.max(1, ...activity.map((a) => a.logs));
+  const totalLogs = activity.reduce((s, a) => s + a.logs, 0);
 
-  const toggleDuty = (id: string) =>
-    setDuties((prev) =>
-      prev.map((d) => (d.id === id ? { ...d, done: !d.done } : d)),
-    );
+  const toggleDuty = (id: string) => {
+    const d = duties.find((x) => x.id === id);
+    if (d) onToggleDuty(id, !d.done);
+  };
 
   const addDuty = () => {
     const t = newDuty.trim();
     if (!t) return;
-    const iso = newDueIso || defaultDueIso();
-    const d: Duty = {
-      id: `D-${Date.now()}`,
+    onAddDuty({
       title: t,
       caseId: newCaseId === NONE_CASE ? undefined : newCaseId,
-      due: formatDue(iso),
-      dueIso: iso,
+      dueIso: newDueIso || defaultDueIso(),
       priority: newPriority,
-      done: false,
       category: newCategory,
-    };
-    setDuties((prev) => [d, ...prev]);
+    });
     setNewDuty("");
     setNewCaseId(NONE_CASE);
     setNewPriority("normal");
@@ -195,9 +176,13 @@ export const SentinelOverview = ({ onJumpToCase }: Props) => {
 
   const caseLabel = (id?: string) => {
     if (!id) return null;
-    const c = CASES.find((x) => x.id === id);
+    const c = cases.find((x) => x.id === id);
     return c ? `${c.id} · ${c.german}` : id;
   };
+
+  const initials = sentinel.name.split(/\s+/).map((p) => p[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "S";
+  const capTotal = sentinel.capacity.total;
+  const capPct = capTotal > 0 ? Math.round((sentinel.capacity.used / capTotal) * 100) : 0;
 
   return (
     <div className="grid gap-8 lg:grid-cols-12">
@@ -207,77 +192,89 @@ export const SentinelOverview = ({ onJumpToCase }: Props) => {
           <span className="eyebrow">Profil</span>
           <div className="mt-4 flex items-start gap-4">
             <div className="flex h-14 w-14 items-center justify-center bg-primary/10 font-display text-xl text-primary">
-              KH
+              {initials}
             </div>
             <div>
               <div className="font-display text-xl tracking-tight">
-                {ME_SENTINEL.name}
+                {sentinel.name}
               </div>
               <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                Stufe {ME_SENTINEL.tier} · seit {ME_SENTINEL.joined}
+                {!live && `Stufe ${sentinel.tier} · `}seit {sentinel.joined}
               </div>
-              <div className="mt-1 font-mono text-[10px] text-primary">
-                Ø Reaktion {ME_SENTINEL.reactionMinutes} Min
-              </div>
+              {sentinel.reactionMinutes > 0 && (
+                <div className="mt-1 font-mono text-[10px] text-primary">
+                  Ø Reaktion {sentinel.reactionMinutes} Min
+                </div>
+              )}
             </div>
           </div>
 
           <ul className="mt-5 space-y-2 text-sm">
-            <li className="flex items-start gap-2">
-              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="text-muted-foreground">{ME_SENTINEL.contact.address}</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="font-mono text-xs">{ME_SENTINEL.contact.phone}</span>
-            </li>
+            {sentinel.contact.address && (
+              <li className="flex items-start gap-2">
+                <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="text-muted-foreground">{sentinel.contact.address}</span>
+              </li>
+            )}
+            {sentinel.contact.phone && (
+              <li className="flex items-center gap-2">
+                <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="font-mono text-xs">{sentinel.contact.phone}</span>
+              </li>
+            )}
             <li className="flex items-center gap-2">
               <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="font-mono text-xs">{ME_SENTINEL.contact.email}</span>
+              <span className="font-mono text-xs">{sentinel.contact.email}</span>
             </li>
-            <li className="flex items-start gap-2 border-t border-border pt-2">
-              <Stethoscope className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                  Vet on call
-                </div>
-                <div className="text-sm">
-                  {ME_SENTINEL.vetOnCall.name} ·{" "}
-                  <span className="font-mono text-xs">{ME_SENTINEL.vetOnCall.phone}</span>
-                </div>
-              </div>
-            </li>
-          </ul>
-        </div>
-
-        <div className="bg-surface p-6">
-          <span className="eyebrow flex items-center gap-2">
-            <ShieldCheck className="h-3 w-3" /> Zertifikate
-          </span>
-          <ul className="mt-4 space-y-3">
-            {ME_SENTINEL.certifications.map((c) => (
-              <li key={c.ref} className="border-l-2 border-primary/40 pl-3">
-                <div className="text-sm">{c.label}</div>
-                <div className="mt-0.5 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                  <span>{c.authority}</span>
-                  <span className="text-primary/70">gültig {c.validUntil}</span>
-                </div>
-                <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                  Ref {c.ref}
+            {sentinel.vetOnCall.name && (
+              <li className="flex items-start gap-2 border-t border-border pt-2">
+                <Stethoscope className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <div>
+                  <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                    Vet on call
+                  </div>
+                  <div className="text-sm">
+                    {sentinel.vetOnCall.name} ·{" "}
+                    <span className="font-mono text-xs">{sentinel.vetOnCall.phone}</span>
+                  </div>
                 </div>
               </li>
-            ))}
+            )}
           </ul>
         </div>
 
-        <div className="bg-surface p-6">
-          <span className="eyebrow">Versicherung</span>
-          <div className="mt-3 text-sm">{ME_SENTINEL.insurance.policy}</div>
-          <div className="mt-1 font-mono text-[11px] text-muted-foreground">
-            Deckung {(ME_SENTINEL.insurance.coverEur / 1_000_000).toFixed(1)} Mio €
-            · gültig bis {ME_SENTINEL.insurance.validUntil}
+        {sentinel.certifications.length > 0 && (
+          <div className="bg-surface p-6">
+            <span className="eyebrow flex items-center gap-2">
+              <ShieldCheck className="h-3 w-3" /> Zertifikate
+            </span>
+            <ul className="mt-4 space-y-3">
+              {sentinel.certifications.map((c) => (
+                <li key={c.ref} className="border-l-2 border-primary/40 pl-3">
+                  <div className="text-sm">{c.label}</div>
+                  <div className="mt-0.5 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                    <span>{c.authority}</span>
+                    <span className="text-primary/70">gültig {c.validUntil}</span>
+                  </div>
+                  <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                    Ref {c.ref}
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
-        </div>
+        )}
+
+        {sentinel.insurance.policy && (
+          <div className="bg-surface p-6">
+            <span className="eyebrow">Versicherung</span>
+            <div className="mt-3 text-sm">{sentinel.insurance.policy}</div>
+            <div className="mt-1 font-mono text-[11px] text-muted-foreground">
+              Deckung {(sentinel.insurance.coverEur / 1_000_000).toFixed(1)} Mio €
+              · gültig bis {sentinel.insurance.validUntil}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Mittlere + rechte Spalte */}
@@ -288,69 +285,75 @@ export const SentinelOverview = ({ onJumpToCase }: Props) => {
             <div>
               <span className="eyebrow">Kapazitäten · Anlagen</span>
               <h3 className="mt-2 text-xl tracking-tight">
-                {ME_SENTINEL.capacity.used} von {ME_SENTINEL.capacity.total} Plätzen belegt
+                {sentinel.capacity.used} von {sentinel.capacity.total} Plätzen belegt
               </h3>
             </div>
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
-              {Math.round((ME_SENTINEL.capacity.used / ME_SENTINEL.capacity.total) * 100)}% Auslastung
-            </span>
+            {capTotal > 0 && (
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
+                {capPct}% Auslastung
+              </span>
+            )}
           </div>
 
-          {/* Slot-Grid */}
-          <div className="grid grid-cols-3 gap-px bg-border md:grid-cols-6">
-            {ME_SENTINEL.enclosures.map((e) => (
-              <button
-                key={e.id}
-                onClick={() => e.occupiedBy && onJumpToCase(e.occupiedBy)}
-                disabled={!e.occupiedBy}
-                className={`group relative flex flex-col bg-surface p-4 text-left transition-colors ${
-                  e.occupiedBy ? "hover:bg-surface-elevated" : "cursor-default"
-                }`}
-              >
-                <span
-                  className={`inline-flex h-5 w-fit items-center px-1.5 font-mono text-[9px] uppercase tracking-[0.18em] ${ENCLOSURE_TONE[e.status]}`}
-                >
-                  {e.status}
-                </span>
-                <span className="mt-3 font-display text-lg">{e.id}</span>
-                <span className="mt-0.5 text-[11px] text-muted-foreground">{e.type}</span>
-                <span className="mt-1 font-mono text-[10px] text-muted-foreground">
-                  {e.sizeCm} cm
-                </span>
-                {e.occupiedBy && (
-                  <span className="mt-2 font-mono text-[10px] text-primary">
-                    {e.occupiedBy}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {/* Breakdown by type */}
-          <div className="border-t border-border p-6">
-            <span className="eyebrow">Verteilung nach Anlagentyp</span>
-            <ul className="mt-4 space-y-3">
-              {enclosureBreakdown.map(([type, v]) => {
-                const pct = (v.belegt / v.total) * 100;
-                return (
-                  <li key={type}>
-                    <div className="flex items-center justify-between text-sm">
-                      <span>{type}</span>
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {v.belegt}/{v.total}
+          {/* Slot-Grid (demo has real enclosures; live shows it once they exist) */}
+          {sentinel.enclosures.length > 0 && (
+            <>
+              <div className="grid grid-cols-3 gap-px bg-border md:grid-cols-6">
+                {sentinel.enclosures.map((e) => (
+                  <button
+                    key={e.id}
+                    onClick={() => e.occupiedBy && onJumpToCase(e.occupiedBy)}
+                    disabled={!e.occupiedBy}
+                    className={`group relative flex flex-col bg-surface p-4 text-left transition-colors ${
+                      e.occupiedBy ? "hover:bg-surface-elevated" : "cursor-default"
+                    }`}
+                  >
+                    <span
+                      className={`inline-flex h-5 w-fit items-center px-1.5 font-mono text-[9px] uppercase tracking-[0.18em] ${ENCLOSURE_TONE[e.status]}`}
+                    >
+                      {e.status}
+                    </span>
+                    <span className="mt-3 font-display text-lg">{e.id}</span>
+                    <span className="mt-0.5 text-[11px] text-muted-foreground">{e.type}</span>
+                    <span className="mt-1 font-mono text-[10px] text-muted-foreground">
+                      {e.sizeCm} cm
+                    </span>
+                    {e.occupiedBy && (
+                      <span className="mt-2 font-mono text-[10px] text-primary">
+                        {e.occupiedBy}
                       </span>
-                    </div>
-                    <div className="mt-1.5 h-1 w-full bg-border">
-                      <div
-                        className="h-full bg-primary transition-all"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* Breakdown by type */}
+              <div className="border-t border-border p-6">
+                <span className="eyebrow">Verteilung nach Anlagentyp</span>
+                <ul className="mt-4 space-y-3">
+                  {enclosureBreakdown.map(([type, v]) => {
+                    const pct = (v.belegt / v.total) * 100;
+                    return (
+                      <li key={type}>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>{type}</span>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {v.belegt}/{v.total}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 h-1 w-full bg-border">
+                          <div
+                            className="h-full bg-primary transition-all"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </>
+          )}
         </section>
 
         {/* Aktivitäts-Visualizer */}
@@ -364,7 +367,7 @@ export const SentinelOverview = ({ onJumpToCase }: Props) => {
             </span>
           </div>
           <div className="mt-6 flex items-end gap-2 h-32">
-            {ACTIVITY_7D.map((a) => {
+            {activity.map((a) => {
               const h = (a.logs / maxLogs) * 100;
               const isPeak = a.logs === maxLogs;
               return (
@@ -449,7 +452,7 @@ export const SentinelOverview = ({ onJumpToCase }: Props) => {
                   <SelectItem value={NONE_CASE} className="font-mono text-xs">
                     — kein Fall —
                   </SelectItem>
-                  {CASES.map((c) => (
+                  {cases.map((c) => (
                     <SelectItem key={c.id} value={c.id} className="font-mono text-xs">
                       {c.id} · {c.german}
                     </SelectItem>
@@ -480,7 +483,7 @@ export const SentinelOverview = ({ onJumpToCase }: Props) => {
                 <SelectItem value={ALL_CASE} className="font-mono text-xs">
                   Alle Fälle
                 </SelectItem>
-                {CASES.map((c) => (
+                {cases.map((c) => (
                   <SelectItem key={c.id} value={c.id} className="font-mono text-xs">
                     {c.id} · {c.german}
                   </SelectItem>

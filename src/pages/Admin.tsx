@@ -1,11 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { useAuth } from "@/hooks/useAuth";
+import { EXTERNAL_CONFIG } from "@/config/external";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 import { CheckCircle2, ChevronRight, FileText, XCircle, Clock, Eye } from "lucide-react";
@@ -37,23 +40,75 @@ interface DocRow {
   doc_type: string;
   storage_path: string;
   file_name: string;
+  mime_type: string | null;
+}
+
+interface AuditRow {
+  id: string;
+  action: string;
+  from_status: Status | null;
+  to_status: Status | null;
+  notes: string | null;
+  created_at: string;
+}
+
+interface ChangeRow {
+  id: string;
+  actor_id: string;
+  action: string;
+  table_name: string;
+  record_id: string;
+  changed_at: string;
 }
 
 const Admin = () => {
   const { t } = useTranslation();
   const { user, isAdmin, loading } = useAuth();
+  const { getToken } = useClerkAuth();
   const supabase = useExternalSupabase();
   const [filter, setFilter] = useState<Status | "all">("pending");
   const [apps, setApps] = useState<Application[]>([]);
   const [selected, setSelected] = useState<Application | null>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ url: string; mime: string } | null>(null);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [shelterReqs, setShelterReqs] = useState<
     { id: string; user_id: string; email: string; display_name: string | null; status: string }[]
   >([]);
   const [shelterBusy, setShelterBusy] = useState(false);
+  const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [changes, setChanges] = useState<ChangeRow[]>([]);
+  const [roleUserId, setRoleUserId] = useState("");
+  const [roleRole, setRoleRole] = useState("behoerde");
+  const [roleRegion, setRoleRegion] = useState("");
+  const [roleBusy, setRoleBusy] = useState(false);
+
+  const setUserRole = async () => {
+    const uid = roleUserId.trim();
+    if (!uid) return;
+    setRoleBusy(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${EXTERNAL_CONFIG.SUPABASE_URL}/functions/v1/set-user-role`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token ?? ""}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: uid,
+          role: roleRole,
+          region: roleRole === "behoerde" ? roleRegion.trim() || null : undefined,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? `HTTP ${res.status}`);
+      toast({ title: "Rolle gesetzt", description: `${uid} → ${roleRole}${roleRegion.trim() ? ` · ${roleRegion.trim()}` : ""}` });
+      setRoleUserId("");
+      setRoleRegion("");
+    } catch (e) {
+      toast({ title: "Fehlgeschlagen", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setRoleBusy(false);
+    }
+  };
 
   useEffect(() => {
     document.title = "Admin · BioSteward";
@@ -63,7 +118,9 @@ const Admin = () => {
     let q = supabase
       .from("sentinel_applications")
       .select("*")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      // ponytail: hard cap, add .range() paging when the queue outgrows 100
+      .limit(100);
     if (filter !== "all") q = q.eq("status", filter);
     const { data, error } = await q;
     if (error) {
@@ -71,7 +128,7 @@ const Admin = () => {
       return;
     }
     setApps((data ?? []) as Application[]);
-  }, [filter]);
+  }, [filter, supabase]);
 
   useEffect(() => {
     if (isAdmin) load();
@@ -81,7 +138,8 @@ const Admin = () => {
     const { data, error } = await supabase
       .from("pending_shelter_requests")
       .select("id, user_id, email, display_name, status")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(100);
     if (error) {
       toast({ title: "Load failed", description: error.message, variant: "destructive" });
       return;
@@ -92,6 +150,24 @@ const Admin = () => {
   useEffect(() => {
     if (isAdmin) void loadShelterReqs();
   }, [isAdmin, loadShelterReqs]);
+
+  // Global custody-table audit trail (00011 change_log, written by DB triggers).
+  const loadChanges = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("change_log")
+      .select("id, actor_id, action, table_name, record_id, changed_at")
+      .order("changed_at", { ascending: false })
+      .limit(50);
+    if (error) {
+      toast({ title: "Load failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    setChanges((data ?? []) as ChangeRow[]);
+  }, [supabase]);
+
+  useEffect(() => {
+    if (isAdmin) void loadChanges();
+  }, [isAdmin, loadChanges]);
 
   const decideShelter = async (id: string, status: "approved" | "rejected") => {
     if (!user) return;
@@ -114,11 +190,19 @@ const Admin = () => {
   const openApp = async (app: Application) => {
     setSelected(app);
     setNotes(app.reviewer_notes ?? "");
-    const { data } = await supabase
-      .from("application_documents")
-      .select("id, doc_type, storage_path, file_name")
-      .eq("application_id", app.id);
-    setDocs((data ?? []) as DocRow[]);
+    const [{ data: docData }, { data: auditData }] = await Promise.all([
+      supabase
+        .from("application_documents")
+        .select("id, doc_type, storage_path, file_name, mime_type")
+        .eq("application_id", app.id),
+      supabase
+        .from("application_audit_log")
+        .select("id, action, from_status, to_status, notes, created_at")
+        .eq("application_id", app.id)
+        .order("created_at", { ascending: false }),
+    ]);
+    setDocs((docData ?? []) as DocRow[]);
+    setAudit((auditData ?? []) as AuditRow[]);
   };
 
   const openDoc = async (path: string, fileName?: string) => {
@@ -132,7 +216,7 @@ const Admin = () => {
     window.open(data.signedUrl, "_blank");
   };
 
-  const previewDoc = async (path: string) => {
+  const previewDoc = async (path: string, mime: string | null) => {
     const { data, error } = await supabase.storage
       .from("kyc-documents")
       .createSignedUrl(path, 60);
@@ -140,7 +224,7 @@ const Admin = () => {
       toast({ title: "Doc not accessible", variant: "destructive" });
       return;
     }
-    setPreview(data.signedUrl);
+    setPreview({ url: data.signedUrl, mime: mime ?? "" });
   };
 
   const setStatus = async (newStatus: Status) => {
@@ -241,6 +325,46 @@ const Admin = () => {
           )}
         </div>
 
+        {/* Role & region management (Clerk publicMetadata via edge function) */}
+        <div className="mt-8 border border-border bg-surface p-6">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+            Rollen &amp; Regionen
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Clerk User-ID (z.B. aus dem Antrag, Feld „User") + Rolle setzen. Behörde braucht zusätzlich eine Region.
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Input
+              value={roleUserId}
+              onChange={(e) => setRoleUserId(e.target.value)}
+              placeholder="user_…"
+              className="w-64 font-mono text-xs"
+            />
+            <select
+              value={roleRole}
+              onChange={(e) => setRoleRole(e.target.value)}
+              className="h-10 border border-border bg-background px-3 text-sm"
+            >
+              <option value="behoerde">behoerde</option>
+              <option value="einrichtung">einrichtung</option>
+              <option value="sentinel">sentinel</option>
+              <option value="admin">admin</option>
+              <option value="user">user (Zurücksetzen)</option>
+            </select>
+            {roleRole === "behoerde" && (
+              <Input
+                value={roleRegion}
+                onChange={(e) => setRoleRegion(e.target.value)}
+                placeholder="Region, z.B. DE-Süd"
+                className="w-48"
+              />
+            )}
+            <Button size="sm" disabled={roleBusy || !roleUserId.trim()} onClick={setUserRole}>
+              {roleBusy ? "Setze …" : "Rolle setzen"}
+            </Button>
+          </div>
+        </div>
+
         {/* Filter */}
         <div className="mt-8 flex flex-wrap gap-2">
           {([
@@ -316,6 +440,14 @@ const Admin = () => {
                 </div>
 
                 <dl className="mt-6 space-y-3 text-sm">
+                  <Row k="User" v={selected.user_id}>
+                    <button
+                      onClick={() => { setRoleUserId(selected.user_id); setRoleRole("behoerde"); setRoleRegion(selected.region); }}
+                      className="ml-2 font-mono text-[10px] uppercase tracking-[0.2em] text-primary hover:underline"
+                    >
+                      → Rolle
+                    </button>
+                  </Row>
                   <Row k="Erfahrung" v={`${selected.experience_years} Jahre`} />
                   <Row k="Spezies" v={selected.species_focus ?? "—"} />
                   <div>
@@ -352,7 +484,7 @@ const Admin = () => {
                           <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{d.doc_type}</p>
                           <p className="mt-1 truncate text-xs text-foreground/80">{d.file_name}</p>
                           <div className="mt-2 flex gap-2">
-                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => previewDoc(d.storage_path)}>
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => previewDoc(d.storage_path, d.mime_type)}>
                               <Eye className="mr-1 h-3 w-3" /> {t("admin.viewDoc")}
                             </Button>
                             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => openDoc(d.storage_path, d.file_name)}>
@@ -368,6 +500,29 @@ const Admin = () => {
                 <div className="mt-6">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{t("admin.notes")}</p>
                   <Textarea rows={4} className="mt-2" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} />
+                </div>
+
+                <div className="mt-6">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Audit-Spur</p>
+                  {audit.length === 0 ? (
+                    <p className="mt-2 text-xs text-muted-foreground">Noch keine Einträge.</p>
+                  ) : (
+                    <ul className="mt-2 divide-y divide-border border border-border bg-background">
+                      {audit.map((a) => (
+                        <li key={a.id} className="px-4 py-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">
+                              {a.from_status ?? "—"} → {a.to_status ?? a.action}
+                            </span>
+                            <span className="font-mono text-[10px] text-muted-foreground">
+                              {new Date(a.created_at).toLocaleString("de-DE")}
+                            </span>
+                          </div>
+                          {a.notes && <p className="mt-1 text-xs text-muted-foreground">{a.notes}</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
 
                 <div className="mt-6 flex flex-wrap gap-2">
@@ -389,19 +544,53 @@ const Admin = () => {
         <Dialog open={preview !== null} onOpenChange={(o) => !o && setPreview(null)}>
           <DialogContent className="max-w-3xl bg-background p-2">
             <DialogTitle className="sr-only">Dokumentenvorschau</DialogTitle>
-            {preview && <img src={preview} alt="Dokumentenvorschau" className="max-h-[80vh] w-full object-contain" />}
+            {preview && preview.mime.startsWith("image/") && (
+              <img src={preview.url} alt="Dokumentenvorschau" className="max-h-[80vh] w-full object-contain" />
+            )}
+            {preview && preview.mime === "application/pdf" && (
+              <iframe src={preview.url} title="Dokumentenvorschau" className="h-[80vh] w-full" />
+            )}
+            {preview && !preview.mime.startsWith("image/") && preview.mime !== "application/pdf" && (
+              <p className="p-6 text-sm text-muted-foreground">
+                Keine Vorschau für diesen Dateityp — bitte herunterladen.
+              </p>
+            )}
           </DialogContent>
         </Dialog>
+
+        {/* Custody-table change log (trigger-written, append-only) */}
+        <div className="mt-10 border border-border bg-surface p-6">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+            Änderungsprotokoll · Custody-Tabellen
+          </p>
+          {changes.length === 0 ? (
+            <p className="mt-3 text-sm text-muted-foreground">Noch keine Änderungen protokolliert.</p>
+          ) : (
+            <ul className="mt-4 divide-y divide-border">
+              {changes.map((c) => (
+                <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-xs">
+                  <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    <span className={c.action === "DELETE" ? "text-destructive" : "text-foreground"}>{c.action}</span>
+                    {" · "}{c.table_name}{" · "}{c.record_id.slice(0, 8)}…
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {new Date(c.changed_at).toLocaleString("de-DE")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </main>
       <SiteFooter />
     </div>
   );
 };
 
-const Row = ({ k, v }: { k: string; v: string }) => (
+const Row = ({ k, v, children }: { k: string; v: string; children?: React.ReactNode }) => (
   <div className="grid grid-cols-3 gap-3">
     <dt className="text-muted-foreground">{k}</dt>
-    <dd className="col-span-2">{v}</dd>
+    <dd className="col-span-2 flex items-center gap-2">{v}{children}</dd>
   </div>
 );
 

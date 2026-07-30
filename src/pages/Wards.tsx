@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { safeExtension } from "@/lib/uploads";
+import { sniffImage } from "@/lib/uploads";
 import { ShieldCheck, Lock, AlertTriangle, Plus, X, ImagePlus } from "lucide-react";
 
 type Ward = {
@@ -19,6 +19,7 @@ type Ward = {
   case_code: string;
   common_name: string;
   scientific_name: string | null;
+  cites_listing: string | null;
   sex: string | null;
   age_estimate: string | null;
   size_estimate: string | null;
@@ -46,6 +47,7 @@ type FormState = {
   case_code: string;
   common_name: string;
   scientific_name: string;
+  cites_listing: string;
   sex: string;
   age_estimate: string;
   size_estimate: string;
@@ -55,12 +57,14 @@ type FormState = {
   background: string;
   care_requirements: string;
   space_requirements: string;
+  assign_to: string;
 };
 
 const emptyForm: FormState = {
   case_code: "",
   common_name: "",
   scientific_name: "",
+  cites_listing: "",
   sex: "",
   age_estimate: "",
   size_estimate: "",
@@ -70,6 +74,7 @@ const emptyForm: FormState = {
   background: "",
   care_requirements: "",
   space_requirements: "",
+  assign_to: "",
 };
 
 const urgencyTone: Record<string, string> = {
@@ -102,6 +107,15 @@ const Wards = () => {
   const [pendingImages, setPendingImages] = useState<File[]>([]);
   const [carriedImages, setCarriedImages] = useState<string[]>([]);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+
+  // Object URLs live exactly as long as their File in pendingImages —
+  // creating them during render leaks a URL per render.
+  useEffect(() => {
+    const urls = pendingImages.map((f) => URL.createObjectURL(f));
+    setPreviewUrls(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [pendingImages]);
 
   const myWards = useMemo(
     () => wards.filter((w) => user && w.owner_id === user.id),
@@ -151,9 +165,10 @@ const Wards = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [access.kind, user?.id]);
 
-  // Sign URLs whenever ward image paths change
+  // Sign URLs whenever ward image paths change — only the paths the grid
+  // actually renders (cover + 4 thumbs per ward), not entire galleries.
   useEffect(() => {
-    const allPaths = Array.from(new Set(wards.flatMap((w) => w.images ?? [])));
+    const allPaths = Array.from(new Set(wards.flatMap((w) => (w.images ?? []).slice(0, 5))));
     const missing = allPaths.filter((p) => !signedUrls[p]);
     if (missing.length === 0) return;
     void (async () => {
@@ -173,7 +188,9 @@ const Wards = () => {
     const { data, error } = await supabase
       .from("ward_listings")
       .select("*")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      // ponytail: hard cap, add .range() paging when listings approach 50
+      .limit(50);
     if (error) {
       toast({ title: "Fehler beim Laden", description: error.message, variant: "destructive" });
       return;
@@ -197,6 +214,7 @@ const Wards = () => {
       case_code: w.case_code,
       common_name: w.common_name,
       scientific_name: w.scientific_name ?? "",
+      cites_listing: w.cites_listing ?? "",
       sex: w.sex ?? "",
       age_estimate: w.age_estimate ?? "",
       size_estimate: w.size_estimate ?? "",
@@ -206,6 +224,7 @@ const Wards = () => {
       background: w.background,
       care_requirements: w.care_requirements,
       space_requirements: w.space_requirements,
+      assign_to: "",
     });
     setCarriedImages(w.images ?? []);
     setPendingImages([]);
@@ -226,11 +245,16 @@ const Wards = () => {
     // Upload new images first
     const uploadedPaths: string[] = [];
     for (const file of pendingImages) {
-      const ext = safeExtension(file);
-      const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+      const img = await sniffImage(file);
+      if (!img) {
+        setSubmitting(false);
+        toast({ title: "Ungültiges Bild", description: `${file.name}: nur JPG/PNG/WebP/GIF/AVIF bis 10 MB.`, variant: "destructive" });
+        return;
+      }
+      const path = `${user.id}/${crypto.randomUUID()}.${img.ext}`;
       const { error: upErr } = await supabase.storage
         .from("ward-images")
-        .upload(path, file, { contentType: file.type, upsert: false });
+        .upload(path, file, { contentType: img.mime, upsert: false });
       if (upErr) {
         setSubmitting(false);
         toast({ title: "Bild-Upload fehlgeschlagen", description: upErr.message, variant: "destructive" });
@@ -240,11 +264,14 @@ const Wards = () => {
     }
 
     const payload = {
-      owner_id: user.id,
+      // Staff (admin/shelter/gov) may assign the ward to an approved sentinel
+      // via User-ID; default is keeping it with the creator (shelter stock).
+      owner_id: form.assign_to.trim() || user.id,
       shelter_id: isEinrichtung ? myShelterId : null,
       case_code: form.case_code.trim(),
       common_name: form.common_name.trim(),
       scientific_name: form.scientific_name.trim() || null,
+      cites_listing: form.cites_listing || null,
       sex: form.sex.trim() || null,
       age_estimate: form.age_estimate.trim() || null,
       size_estimate: form.size_estimate.trim() || null,
@@ -283,6 +310,18 @@ const Wards = () => {
     setInterestOpen(null);
     setInterestMessage("");
     void loadMyInterests();
+  };
+
+  // Outcome recording: owner/admin sets the ward's status. The change_log
+  // trigger on ward_listings writes the audit entry automatically.
+  const setWardStatus = async (id: string, status: Ward["status"]) => {
+    const { error } = await supabase.from("ward_listings").update({ status }).eq("id", id);
+    if (error) {
+      toast({ title: "Status fehlgeschlagen", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Status aktualisiert", description: statusLabel[status] });
+    void loadWards();
   };
 
   return (
@@ -357,6 +396,7 @@ const Wards = () => {
               myWards={myWards}
               currentUserId={user!.id}
               isAdmin={isAdmin}
+              canCreate={isAdmin || isEinrichtung}
               myInterests={myInterests}
               showForm={showForm}
               setShowForm={(v) => { setShowForm(v); if (!v) resetForm(); }}
@@ -365,6 +405,7 @@ const Wards = () => {
               form={form}
               setForm={setForm}
               pendingImages={pendingImages}
+              previewUrls={previewUrls}
               setPendingImages={setPendingImages}
               carriedImages={carriedImages}
               setCarriedImages={setCarriedImages}
@@ -376,6 +417,7 @@ const Wards = () => {
               interestMessage={interestMessage}
               setInterestMessage={setInterestMessage}
               submitInterest={submitInterest}
+              setWardStatus={setWardStatus}
             />
           )}
         </div>
@@ -417,6 +459,7 @@ type ApprovedViewProps = {
   myWards: Ward[];
   currentUserId: string;
   isAdmin: boolean;
+  canCreate: boolean;
   myInterests: Set<string>;
   showForm: boolean;
   setShowForm: (v: boolean) => void;
@@ -425,6 +468,7 @@ type ApprovedViewProps = {
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
   pendingImages: File[];
+  previewUrls: string[];
   setPendingImages: React.Dispatch<React.SetStateAction<File[]>>;
   carriedImages: string[];
   setCarriedImages: React.Dispatch<React.SetStateAction<string[]>>;
@@ -436,14 +480,15 @@ type ApprovedViewProps = {
   interestMessage: string;
   setInterestMessage: (v: string) => void;
   submitInterest: (id: string) => void;
+  setWardStatus: (id: string, status: Ward["status"]) => void;
 };
 
 const ApprovedView = ({
-  wards, myWards, currentUserId, isAdmin, myInterests,
+  wards, myWards, currentUserId, isAdmin, canCreate, myInterests,
   showForm, setShowForm, submitting, submitWard,
-  form, setForm, pendingImages, setPendingImages, carriedImages, setCarriedImages,
+  form, setForm, pendingImages, previewUrls, setPendingImages, carriedImages, setCarriedImages,
   prefillFromWard, resetForm, signedUrls,
-  interestOpen, setInterestOpen, interestMessage, setInterestMessage, submitInterest,
+  interestOpen, setInterestOpen, interestMessage, setInterestMessage, submitInterest, setWardStatus,
 }: ApprovedViewProps) => {
   const update = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
@@ -465,13 +510,15 @@ const ApprovedView = ({
             {wards.length} {wards.length === 1 ? "Ward" : "Wards"} · vertraulich
           </p>
         </div>
-        <Button onClick={() => setShowForm(!showForm)} variant={showForm ? "outline" : "default"}>
-          <Plus className="mr-1 h-4 w-4" />
-          {showForm ? "Abbrechen" : "Ward einstellen"}
-        </Button>
+        {canCreate && (
+          <Button onClick={() => setShowForm(!showForm)} variant={showForm ? "outline" : "default"}>
+            <Plus className="mr-1 h-4 w-4" />
+            {showForm ? "Abbrechen" : "Ward einstellen"}
+          </Button>
+        )}
       </div>
 
-      {showForm && (
+      {canCreate && showForm && (
         <form onSubmit={submitWard} className="mt-8 grid gap-5 border border-border bg-surface p-8 md:grid-cols-2">
           {myWards.length > 0 && (
             <div className="md:col-span-2 border border-dashed border-border bg-background p-5">
@@ -508,7 +555,11 @@ const ApprovedView = ({
 
           <Field label="Case-Code" required value={form.case_code} onChange={(v) => update("case_code", v)} placeholder="WARD-2026-001" />
           <Field label="Bezeichnung" required value={form.common_name} onChange={(v) => update("common_name", v)} placeholder="Bartagame, weiblich" />
-          <Field label="Wiss. Name" value={form.scientific_name} onChange={(v) => update("scientific_name", v)} placeholder="Pogona vitticeps" />
+          <SpeciesField
+            value={form.scientific_name}
+            onChange={(v) => update("scientific_name", v)}
+            onListingChange={(l) => update("cites_listing", l)}
+          />
           <Field label="Geschlecht" value={form.sex} onChange={(v) => update("sex", v)} placeholder="weiblich / männlich / unbekannt" />
           <Field label="Alter (geschätzt)" value={form.age_estimate} onChange={(v) => update("age_estimate", v)} placeholder="ca. 6 Jahre" />
           <Field label="Größe / Gewicht" value={form.size_estimate} onChange={(v) => update("size_estimate", v)} placeholder="48 cm / 420 g" />
@@ -542,7 +593,7 @@ const ApprovedView = ({
               {carriedImages.map((path) => (
                 <div key={path} className="relative h-24 w-24 overflow-hidden border border-border bg-background">
                   {signedUrls[path]
-                    ? <img src={signedUrls[path]} alt="" className="h-full w-full object-cover" />
+                    ? <img src={signedUrls[path]} alt="Tierfoto Vorschau" className="h-full w-full object-cover" />
                     : <div className="h-full w-full animate-pulse bg-muted" />}
                   <button
                     type="button"
@@ -554,9 +605,9 @@ const ApprovedView = ({
                   </button>
                 </div>
               ))}
-              {pendingImages.map((file, i) => (
+              {pendingImages.map((_file, i) => (
                 <div key={i} className="relative h-24 w-24 overflow-hidden border border-primary/40 bg-background">
-                  <img src={URL.createObjectURL(file)} alt="" className="h-full w-full object-cover" />
+                  {previewUrls[i] && <img src={previewUrls[i]} alt="Tierfoto Vorschau" className="h-full w-full object-cover" />}
                   <button
                     type="button"
                     onClick={() => setPendingImages((p) => p.filter((_, idx) => idx !== i))}
@@ -576,6 +627,21 @@ const ApprovedView = ({
                 <input type="file" accept="image/*" multiple className="hidden" onChange={onPickFiles} />
               </label>
             </div>
+          </div>
+
+          <div className="md:col-span-2">
+            <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+              Sentinel-Zuweisung (User-ID, optional)
+            </Label>
+            <Input
+              value={form.assign_to}
+              onChange={(e) => update("assign_to", e.target.value)}
+              placeholder="user_… — leer = Ward bleibt bei dir"
+              className="mt-2 font-mono text-xs"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Nur Sentinels mit freigegebener Bewerbung können zugewiesen werden.
+            </p>
           </div>
 
           <div className="md:col-span-2 flex justify-end">
@@ -601,7 +667,7 @@ const ApprovedView = ({
               {cover && (
                 <div className="mb-5 aspect-[16/10] w-full overflow-hidden border border-border bg-muted">
                   {signedUrls[cover]
-                    ? <img src={signedUrls[cover]} alt={w.common_name} className="h-full w-full object-cover" />
+                    ? <img src={signedUrls[cover]} alt={w.common_name} loading="lazy" className="h-full w-full object-cover" />
                     : <div className="h-full w-full animate-pulse bg-muted" />}
                 </div>
               )}
@@ -609,7 +675,7 @@ const ApprovedView = ({
                 <div className="mb-5 flex flex-wrap gap-2">
                   {w.images.slice(1, 5).map((p) => (
                     <div key={p} className="h-14 w-14 overflow-hidden border border-border bg-muted">
-                      {signedUrls[p] && <img src={signedUrls[p]} alt="" className="h-full w-full object-cover" />}
+                      {signedUrls[p] && <img src={signedUrls[p]} alt={w.common_name} loading="lazy" className="h-full w-full object-cover" />}
                     </div>
                   ))}
                   {w.images.length > 5 && (
@@ -627,7 +693,14 @@ const ApprovedView = ({
                   </p>
                   <h3 className="font-display mt-3 text-2xl leading-tight">{w.common_name}</h3>
                   {w.scientific_name && (
-                    <p className="mt-1 text-xs italic text-muted-foreground">{w.scientific_name}</p>
+                    <p className="mt-1 text-xs italic text-muted-foreground">
+                      {w.scientific_name}
+                      {w.cites_listing && (
+                        <span className="ml-2 not-italic font-mono text-[10px] uppercase tracking-[0.18em] text-primary">
+                          CITES {w.cites_listing}
+                        </span>
+                      )}
+                    </p>
                   )}
                 </div>
                 <Badge className={urgencyTone[w.urgency] ?? urgencyTone.standard}>
@@ -648,9 +721,18 @@ const ApprovedView = ({
 
               <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border pt-5">
                 {owned || isAdmin ? (
-                  <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
-                    {owned ? "Du betreust diesen Ward" : "Admin-Sicht"}
-                  </span>
+                  <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                    {owned ? "Du betreust diesen Ward ·" : "Admin ·"} Outcome
+                    <select
+                      value={w.status}
+                      onChange={(e) => setWardStatus(w.id, e.target.value as Ward["status"])}
+                      className="h-8 border border-border bg-background px-2 text-xs normal-case tracking-normal text-foreground"
+                    >
+                      {Object.entries(statusLabel).map(([v, lbl]) => (
+                        <option key={v} value={v}>{lbl}</option>
+                      ))}
+                    </select>
+                  </label>
                 ) : expressed ? (
                   <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
                     Interesse bekundet · in Prüfung
@@ -706,6 +788,61 @@ const Field = ({
     />
   </div>
 );
+
+/** Wiss.-Name input with CITES autocomplete (cites_species, trigram index).
+ *  Native datalist — no picker lib needed. Reports the matched listing up. */
+const SpeciesField = ({
+  value, onChange, onListingChange,
+}: { value: string; onChange: (v: string) => void; onListingChange: (listing: string) => void }) => {
+  const supabase = useExternalSupabase();
+  const [options, setOptions] = useState<{ full_name: string; current_listing: string | null }[]>([]);
+
+  useEffect(() => {
+    const q = value.trim();
+    if (q.length < 3) { setOptions([]); return; }
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from("cites_species")
+        .select("full_name, current_listing")
+        .ilike("full_name", `%${q}%`)
+        .limit(10);
+      setOptions((data ?? []) as { full_name: string; current_listing: string | null }[]);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [value, supabase]);
+
+  const match = options.find((o) => o.full_name === value.trim());
+
+  useEffect(() => {
+    onListingChange(match?.current_listing ?? "");
+  }, [match?.current_listing, onListingChange]);
+
+  return (
+    <div>
+      <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+        Wiss. Name
+      </Label>
+      <Input
+        placeholder="Pogona vitticeps"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-2"
+        list="cites-species"
+        autoComplete="off"
+      />
+      <datalist id="cites-species">
+        {options.map((o) => (
+          <option key={o.full_name} value={o.full_name} label={o.current_listing ? `CITES Anhang ${o.current_listing}` : undefined} />
+        ))}
+      </datalist>
+      {match?.current_listing && (
+        <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-primary">
+          CITES Anhang {match.current_listing}
+        </p>
+      )}
+    </div>
+  );
+};
 
 const TextField = ({
   label, required, value, onChange,

@@ -25,40 +25,49 @@ every step. Allow ~30 minutes the first time.
    - Paste the **JWT Secret** from step 1 into the **Signing key** field.
    - Save.
 
-## 3. Run the SQL migration in Supabase
+## 3. Run the SQL migrations in Supabase
 
 1. In Supabase, open **SQL Editor → New query**.
-2. Paste the entire contents of `external-supabase/migrations/0001_init.sql`.
-3. Click **Run**. You should see `Success. No rows returned`.
+2. Paste and run each file from `external-supabase/migrations/` **in filename
+   order** (`00001_init.sql` … up to the highest number present). Each file is
+   idempotent, so re-running one is safe.
+3. You should see `Success` for every file.
 4. This creates: `profiles`, `user_roles`, `sentinel_applications`,
-   `application_documents`, `application_audit_log`, the
-   `kyc-documents` storage bucket, and all RLS policies.
+   `application_documents`, `application_audit_log`, `ward_listings`,
+   `ward_interest`, `shelters`, `sentinel_shelter_requests`,
+   `pending_shelter_requests`, `cites_species`, `care_logs`, the
+   `kyc-documents` / `ward-images` storage buckets, and all RLS policies.
 
-## 4. Deploy the edge function
+## 4. Deploy the edge functions (web dashboard, no CLI needed)
 
-You need the Supabase CLI: <https://supabase.com/docs/guides/cli>.
+All edge function management happens in the **Supabase Dashboard → Edge Functions**
+tab. For each function, click **"Create a new function"** (or open an existing
+one), paste the source from `external-supabase/functions/<name>/index.ts`, and
+deploy.
 
-```bash
-# from this project's root
-cd external-supabase
+Four functions to deploy/create:
 
-# log in once
-supabase login
+| Function | Action | File |
+|----------|--------|------|
+| `kyc-upload` | Create | `external-supabase/functions/kyc-upload/index.ts` |
+| `delete-account` | Create | `external-supabase/functions/delete-account/index.ts` |
+| `send-application-confirmation` | Create (or update if it exists) | `external-supabase/functions/send-application-confirmation/index.ts` |
+| `set-user-role` | Create | `external-supabase/functions/set-user-role/index.ts` |
 
-# link to your project (use the project ref from the URL)
-supabase link --project-ref YOUR_PROJECT_REF
+### Secrets
 
-# deploy the function
-supabase functions deploy send-application-confirmation --no-verify-jwt
-supabase functions deploy kyc-upload --no-verify-jwt
-supabase functions deploy delete-account --no-verify-jwt
-```
+Still in **Edge Functions**, open **"Manage Secrets"** (or Project Settings →
+API → Edge Functions → Secrets) and set these key-value pairs:
 
-The `delete-account` function needs two secrets set via
-`supabase secrets set`:
+| Secret | Value |
+|--------|-------|
+| `APP_ORIGIN` | Your app URL, e.g. `http://localhost:5173` for local dev or `https://app.deinedomain.de` for production |
+| `CLERK_SECRET_KEY` | From **Clerk Dashboard → API Keys** — the server-side key (starts with `sk_`) |
+| `CLERK_DOMAIN` | e.g. `ideal-tetra-26.clerk.accounts.dev` — your Clerk instance domain |
+| `BREVO_API_KEY` | From **brevo.com → SMTP & API → API Keys** — only needed if you want real confirmation emails. Brevo: EU-based (FR), 300 mails/day free tier, DPA available |
+| `EMAIL_FROM` | Verified sender address for Brevo, e.g. `BioSteward <noreply@deinedomain.de>` |
 
-- `CLERK_SECRET_KEY` — from Clerk → API Keys (server-side, keep secret)
-- `CLERK_DOMAIN` — e.g. `ideal-tetra-26.clerk.accounts.dev`
+All functions share the same secrets — set once, used by all.
 
 ## 5. Fill in `src/config/external.ts`
 

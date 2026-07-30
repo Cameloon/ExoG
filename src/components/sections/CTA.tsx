@@ -22,7 +22,7 @@ export const CTA = () => (
 
           <div className="flex flex-col gap-3 lg:col-span-5 lg:items-end">
             <Button asChild size="lg" className="h-12 w-full px-6 lg:w-auto">
-              <Link to="/dashboard">
+              <Link to="/demo">
                 Live-Demo öffnen
                 <ArrowRight className="ml-1.5 h-4 w-4" />
               </Link>

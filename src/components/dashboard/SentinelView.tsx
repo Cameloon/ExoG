@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -17,10 +17,21 @@ import {
   AlertCircle,
   Download,
 } from "lucide-react";
-import { CASES, CARE_LOGS, ME_SENTINEL, type CareLog } from "@/lib/dashboard-data";
+import { CASES, CARE_LOGS, ME_SENTINEL, DUTIES, ACTIVITY_7D, type CareLog, type Duty, type DutyPriority, type SentinelProfile } from "@/lib/dashboard-data";
 import { RATIONALE_RULES, validateRationale, sign } from "@/lib/care-log-validation";
 import { exportCareLogsZip } from "@/lib/care-log-export";
 import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { useExternalSupabase } from "@/integrations/external/supabase";
+import {
+  addCareLog,
+  fetchCareLogs,
+  fetchLiveSentinelProfile,
+  fetchMyWards,
+  wardToCase,
+  type WardRow,
+} from "@/lib/care-logs";
+import { addDuty as persistDuty, fetchActivity7d, fetchDuties, formatDue, setDutyDone } from "@/lib/duties";
 import { DocumentsHub } from "./DocumentsHub";
 import { SentinelOverview } from "./SentinelOverview";
 
@@ -37,12 +48,120 @@ const BEHAVIORS: NonNullable<CareLog["metrics"]>["behavior"][] = [
 
 
 
-export const SentinelView = () => {
-  const myCases = CASES.filter((c) => ME_SENTINEL.cases.includes(c.id));
-  const [activeId, setActiveId] = useState(myCases[0]?.id ?? "");
+export const SentinelView = ({ live = false }: { live?: boolean }) => {
+  const { user } = useAuth();
+  const supabase = useExternalSupabase();
+
+  // ── Live data (only fetched when live=true; demo uses hardcoded data) ──
+  const [wards, setWards] = useState<WardRow[]>([]);
+  const [liveLogs, setLiveLogs] = useState<Record<string, CareLog[]>>({});
+  const [liveSentinel, setLiveSentinel] = useState<SentinelProfile>(ME_SENTINEL);
+  const [logCount7d, setLogCount7d] = useState(0);
+  const [booting, setBooting] = useState(live);
+
+  const myCases = live
+    ? wards.map(wardToCase)
+    : CASES.filter((c) => ME_SENTINEL.cases.includes(c.id));
+  const sentinel = live ? liveSentinel : ME_SENTINEL;
+
+  const [activeId, setActiveId] = useState("");
   const [logs, setLogs] = useState<Record<string, CareLog[]>>(CARE_LOGS);
   const [section, setSection] = useState<SectionTab>("log");
   const [topTab, setTopTab] = useState<TopTab>("overview");
+
+  // Duties + activity: demo uses local state on the constants, live persists
+  // to the duties table and derives activity from care_logs.
+  const [demoDuties, setDemoDuties] = useState<Duty[]>(DUTIES);
+  const [liveDuties, setLiveDuties] = useState<Duty[]>([]);
+  const [liveActivity, setLiveActivity] = useState<{ day: string; logs: number }[]>(ACTIVITY_7D);
+  const duties = live ? liveDuties : demoDuties;
+  const activity = live ? liveActivity : ACTIVITY_7D;
+
+  const handleToggleDuty = (id: string, done: boolean) => {
+    if (!live) {
+      setDemoDuties((prev) => prev.map((d) => (d.id === id ? { ...d, done } : d)));
+      return;
+    }
+    setLiveDuties((prev) => prev.map((d) => (d.id === id ? { ...d, done } : d)));
+    setDutyDone(supabase, id, done).catch((e) => {
+      // rollback on failure — otherwise the UI lies until reload
+      setLiveDuties((prev) => prev.map((d) => (d.id === id ? { ...d, done: !done } : d)));
+      toast({ title: "Pflicht nicht gespeichert", description: (e as Error).message, variant: "destructive" });
+    });
+  };
+
+  const handleAddDuty = (input: { title: string; caseId?: string; dueIso: string; priority: DutyPriority; category: Duty["category"] }) => {
+    if (!live) {
+      const iso = input.dueIso;
+      setDemoDuties((prev) => [
+        {
+          id: `D-${Date.now()}`,
+          title: input.title,
+          caseId: input.caseId,
+          due: formatDue(iso),
+          dueIso: iso,
+          priority: input.priority,
+          done: false,
+          category: input.category,
+        },
+        ...prev,
+      ]);
+      return;
+    }
+    if (!user) return;
+    void (async () => {
+      try {
+        const d = await persistDuty(supabase, {
+          ownerId: user.id,
+          title: input.title,
+          caseCode: input.caseId ?? null,
+          category: input.category,
+          priority: input.priority,
+          dueIso: input.dueIso || null,
+        });
+        setLiveDuties((prev) => [d, ...prev]);
+      } catch (e) {
+        toast({ title: "Pflicht nicht gespeichert", description: (e as Error).message, variant: "destructive" });
+      }
+    })();
+  };
+
+  // Bootstrap: pick first case, load live data.
+  useEffect(() => {
+    if (!activeId && myCases.length > 0) setActiveId(myCases[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, wards, activeId]);
+
+  useEffect(() => {
+    if (!live || !user) return;
+    void (async () => {
+      try {
+        const w = await fetchMyWards(supabase, user.id);
+        setWards(w);
+        setLiveSentinel(
+          await fetchLiveSentinelProfile(
+            supabase,
+            user.id,
+            user.displayName ?? "Sentinel",
+            user.email ?? "",
+            w.length,
+          ),
+        );
+        const [d, act] = await Promise.all([
+          fetchDuties(supabase, user.id),
+          fetchActivity7d(supabase, user.id),
+        ]);
+        setLiveDuties(d);
+        setLiveActivity(act);
+        // 7d count = sum of the activity buckets — one roundtrip saved.
+        setLogCount7d(act.reduce((s, a) => s + a.logs, 0));
+      } catch (e) {
+        toast({ title: "Laden fehlgeschlagen", description: (e as Error).message, variant: "destructive" });
+      } finally {
+        setBooting(false);
+      }
+    })();
+  }, [live, user, supabase]);
 
   const jumpToCase = (id: string) => {
     if (myCases.some((c) => c.id === id)) {
@@ -62,9 +181,24 @@ export const SentinelView = () => {
   const [behavior, setBehavior] =
     useState<NonNullable<CareLog["metrics"]>["behavior"] | "">("");
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const active = myCases.find((c) => c.id === activeId);
-  const activeLogs = logs[activeId] ?? [];
+  const activeWard = live ? wards.find((w) => w.case_code === activeId) : undefined;
+  const activeLogs = live ? liveLogs[activeId] ?? [] : logs[activeId] ?? [];
+
+  // Load a ward's log history lazily on first select (live only).
+  useEffect(() => {
+    if (!live || !activeWard || liveLogs[activeId]) return;
+    void (async () => {
+      try {
+        const l = await fetchCareLogs(supabase, activeWard.id);
+        setLiveLogs((p) => ({ ...p, [activeId]: l }));
+      } catch (e) {
+        toast({ title: "Log-Verlauf nicht ladbar", description: (e as Error).message, variant: "destructive" });
+      }
+    })();
+  }, [live, activeId, activeWard, liveLogs, supabase]);
 
   const reset = () => {
     setNote("");
@@ -77,7 +211,7 @@ export const SentinelView = () => {
     setError(null);
   };
 
-  const addLog = () => {
+  const addLog = async () => {
     if (!activeId) return;
     if (!note.trim()) return setError("Beobachtung darf nicht leer sein.");
     const v = validateRationale(type, rationale);
@@ -90,6 +224,31 @@ export const SentinelView = () => {
       feedAmountG: feedAmountG ? Number(feedAmountG) : undefined,
       behavior: behavior || undefined,
     };
+
+    // Live: persist hash-chained to care_logs and prepend the stored entry.
+    if (live) {
+      if (!activeWard || !user) return;
+      setSaving(true);
+      try {
+        const entry = await addCareLog(supabase, {
+          wardId: activeWard.id,
+          authorId: user.id,
+          authorName: sentinel.name,
+          type,
+          note: note.trim(),
+          rationale: rationale.trim(),
+          metrics,
+        });
+        setLiveLogs((p) => ({ ...p, [activeId]: [entry, ...(p[activeId] ?? [])] }));
+        setLogCount7d((c) => c + 1);
+        reset();
+      } catch (e) {
+        setError(`Speichern fehlgeschlagen: ${(e as Error).message}`);
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
 
     const payload = `${activeId}|${type}|${note}|${rationale}|${ME_SENTINEL.name}|${Date.now()}`;
     const entry: CareLog = {
@@ -113,7 +272,7 @@ export const SentinelView = () => {
       await exportCareLogsZip({
         caseRecord: active,
         logs: activeLogs,
-        sentinel: ME_SENTINEL,
+        sentinel,
       });
       const nonCompliant = activeLogs.filter(
         (l) => !validateRationale(l.type, l.rationale ?? "").ok,
@@ -137,7 +296,12 @@ export const SentinelView = () => {
   const validation = validateRationale(type, rationale);
 
 
-  const capPct = (ME_SENTINEL.capacity.used / ME_SENTINEL.capacity.total) * 100;
+  const capPct = sentinel.capacity.total > 0 ? (sentinel.capacity.used / sentinel.capacity.total) * 100 : 0;
+
+  // ponytail: block render until live data arrives to avoid demo-flash
+  if (live && booting) {
+    return <p className="font-mono text-xs uppercase tracking-[0.22em] text-muted-foreground">Lade Sentinel-Profil …</p>;
+  }
 
   return (
     <>
@@ -146,13 +310,15 @@ export const SentinelView = () => {
         <div className="bg-background p-6">
           <div className="flex items-start justify-between">
             <PawPrint className="h-4 w-4 text-muted-foreground" />
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
-              Stufe {ME_SENTINEL.tier}
-            </span>
+            {!live && (
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
+                Stufe {ME_SENTINEL.tier}
+              </span>
+            )}
           </div>
-          <div className="mt-6 font-display text-2xl tracking-tight">{ME_SENTINEL.name}</div>
+          <div className="mt-6 font-display text-2xl tracking-tight">{sentinel.name}</div>
           <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-            Sentinel · Region {ME_SENTINEL.region}
+            Sentinel · Region {sentinel.region}
           </div>
         </div>
         <div className="bg-background p-6">
@@ -163,8 +329,8 @@ export const SentinelView = () => {
             </span>
           </div>
           <div className="mt-6 font-display text-4xl tracking-tight">
-            {ME_SENTINEL.capacity.used}
-            <span className="text-muted-foreground">/{ME_SENTINEL.capacity.total}</span>
+            {sentinel.capacity.used}
+            <span className="text-muted-foreground">/{sentinel.capacity.total}</span>
           </div>
           <div className="mt-2 h-1 w-full bg-border">
             <div className="h-full bg-primary" style={{ width: `${capPct}%` }} />
@@ -174,12 +340,12 @@ export const SentinelView = () => {
           <div className="flex items-start justify-between">
             <CalendarClock className="h-4 w-4 text-muted-foreground" />
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              Nächste Pflicht
+              {live ? "Meine Wards" : "Nächste Pflicht"}
             </span>
           </div>
-          <div className="mt-6 font-display text-2xl tracking-tight">14:00</div>
+          <div className="mt-6 font-display text-2xl tracking-tight">{live ? wards.length : "14:00"}</div>
           <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-            Vet-Telefonat · EG-2026-00466
+            {live ? "in eigener Pflege" : "Vet-Telefonat · EG-2026-00466"}
           </div>
         </div>
         <div className="bg-background p-6">
@@ -189,7 +355,7 @@ export const SentinelView = () => {
               7-Tage-Logs
             </span>
           </div>
-          <div className="mt-6 font-display text-4xl tracking-tight">42</div>
+          <div className="mt-6 font-display text-4xl tracking-tight">{live ? logCount7d : 42}</div>
           <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             Einträge erfasst
           </div>
@@ -218,7 +384,16 @@ export const SentinelView = () => {
 
       {topTab === "overview" && (
         <div className="mt-6">
-          <SentinelOverview onJumpToCase={jumpToCase} />
+          <SentinelOverview
+            sentinel={sentinel}
+            cases={myCases}
+            activity={activity}
+            duties={duties}
+            onToggleDuty={handleToggleDuty}
+            onAddDuty={handleAddDuty}
+            onJumpToCase={jumpToCase}
+            live={live}
+          />
         </div>
       )}
 
@@ -228,6 +403,14 @@ export const SentinelView = () => {
         <section className="lg:col-span-5">
           <h2 className="text-xl tracking-tight">Meine Pflegestellen</h2>
           <div className="mt-4 space-y-px bg-border">
+            {live && booting && (
+              <div className="bg-surface p-4 font-mono text-xs text-muted-foreground">Lade Wards …</div>
+            )}
+            {live && !booting && myCases.length === 0 && (
+              <div className="bg-surface p-4 font-mono text-xs text-muted-foreground">
+                Noch keine Wards zugewiesen — Einrichtungen oder Behörden weisen dir Wards zu.
+              </div>
+            )}
             {myCases.map((c) => (
               <button
                 key={c.id}
@@ -467,10 +650,10 @@ export const SentinelView = () => {
 
                 <div className="mt-4 flex items-center justify-between">
                   <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                    <Fingerprint className="h-3 w-3" /> Lokal-Hash · {ME_SENTINEL.name}
+                    <Fingerprint className="h-3 w-3" /> {live ? "Hash-Kette" : "Lokal-Hash"} · {sentinel.name}
                   </span>
-                  <Button size="sm" onClick={addLog} disabled={!note.trim() || !validation.ok}>
-                    <Plus className="mr-2 h-4 w-4" /> Eintragen & signieren
+                  <Button size="sm" onClick={addLog} disabled={!note.trim() || !validation.ok || saving}>
+                    <Plus className="mr-2 h-4 w-4" /> {saving ? "Speichere …" : "Eintragen & signieren"}
                   </Button>
                 </div>
 
@@ -545,7 +728,7 @@ export const SentinelView = () => {
 
               {section === "docs" && (
                 <div className="p-6">
-                  <DocumentsHub caseRecord={active} sentinel={ME_SENTINEL} />
+                  <DocumentsHub caseRecord={active} sentinel={sentinel} />
                 </div>
               )}
             </div>

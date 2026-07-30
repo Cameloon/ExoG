@@ -1,61 +1,56 @@
 /**
  * Supabase client wired to Clerk authentication.
  *
- * Every request fetches a fresh Clerk JWT (issued via the "supabase"
- * JWT template) and passes it to Supabase. RLS policies in the
- * external Supabase project read the JWT's `sub` claim (the Clerk
- * user id, e.g. "user_2abc...") to scope rows.
- *
- * Usage in components:
- *   import { useExternalSupabase } from "@/integrations/external/supabase";
- *   const supabase = useExternalSupabase();
+ * Singleton client — created once, reused everywhere. The Clerk JWT
+ * is injected via a module-level token getter set by the hook on mount,
+ * avoiding duplicate GoTrueClient instances (one per component).
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
-import { useMemo } from "react";
 import { EXTERNAL_CONFIG } from "@/config/external";
 import type { Database } from "@/integrations/supabase/types";
 
+// ponytail: single client instance, avoids "Multiple GoTrueClient instances" warning
+let supabaseClient: SupabaseClient<Database> | null = null;
+let getClerkToken: (() => Promise<string | null>) | null = null;
+
+function getClient(): SupabaseClient<Database> {
+  if (supabaseClient) return supabaseClient;
+  supabaseClient = createClient<Database>(
+    EXTERNAL_CONFIG.SUPABASE_URL,
+    EXTERNAL_CONFIG.SUPABASE_ANON_KEY,
+    {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: {
+        fetch: async (input, init) => {
+          const token = getClerkToken ? await getClerkToken() : null;
+          const headers = new Headers(init?.headers);
+          if (token) headers.set("Authorization", `Bearer ${token}`);
+          return fetch(input, { ...init, headers });
+        },
+      },
+    },
+  );
+  return supabaseClient;
+}
+
 // Anonymous client — only safe for public reads or when no user is signed in.
-export const anonSupabase: SupabaseClient<Database> = createClient<Database>(
+const anon = createClient<Database>(
   EXTERNAL_CONFIG.SUPABASE_URL,
   EXTERNAL_CONFIG.SUPABASE_ANON_KEY,
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  },
+  { auth: { persistSession: false, autoRefreshToken: false } },
 );
 
+export const anonSupabase = anon;
+
 /**
- * React hook returning a Supabase client that injects the current
- * Clerk JWT on every request.
+ * React hook returning the singleton Supabase client.
  */
 export const useExternalSupabase = (): SupabaseClient<Database> => {
   const { getToken } = useClerkAuth();
-
-  return useMemo(() => {
-    return createClient<Database>(
-      EXTERNAL_CONFIG.SUPABASE_URL,
-      EXTERNAL_CONFIG.SUPABASE_ANON_KEY,
-      {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-          detectSessionInUrl: false,
-        },
-        global: {
-          fetch: async (input, init) => {
-            const token = await getToken({
-              template: EXTERNAL_CONFIG.CLERK_SUPABASE_JWT_TEMPLATE,
-            });
-            const headers = new Headers(init?.headers);
-            if (token) headers.set("Authorization", `Bearer ${token}`);
-            return fetch(input, { ...init, headers });
-          },
-        },
-      },
-    );
-  }, [getToken]);
+  getClerkToken = async () => {
+    const t = await getToken({ template: EXTERNAL_CONFIG.CLERK_SUPABASE_JWT_TEMPLATE });
+    return t ?? null;
+  };
+  return getClient();
 };

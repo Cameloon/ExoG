@@ -18,7 +18,7 @@ const roleHome: Record<string, string> = {
   behoerde: "/behoerde",
   einrichtung: "/shelters",
   admin: "/admin",
-  sentinel: "/sentinel/network",
+  sentinel: "/care",
 };
 
 export const Landing = () => {

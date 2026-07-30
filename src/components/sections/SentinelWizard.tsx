@@ -236,7 +236,7 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
         await fetch(`${EXTERNAL_CONFIG.SUPABASE_URL}/functions/v1/send-application-confirmation`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...(clerkToken ? { Authorization: `Bearer ${clerkToken}` } : {}) },
-          body: JSON.stringify({ email: data.email, fullName: data.fullName, caseId: id, language: "de" }),
+          body: JSON.stringify({ email: data.email, fullName: data.fullName, caseId: id }),
         });
       } catch (e) { console.warn("email function failed", e); }
 

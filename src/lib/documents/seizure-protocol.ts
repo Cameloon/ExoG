@@ -1,4 +1,4 @@
-import jsPDF from "jspdf";
+import type jsPDF from "jspdf";
 import {
   DOC_KIT_VERSION,
   FlowCursor,
@@ -47,6 +47,7 @@ export type SeizureInput = {
 };
 
 export async function exportSeizureProtocol(input: SeizureInput) {
+  const { default: jsPDF } = await import("jspdf");
   const meta: DocMeta = {
     title: "Sicherstellungs- / Beschlagnahmungsprotokoll",
     subtitle: `Protokoll gemäß ${input.legalBasis || "§ 16a TierSchG"} – Tier-Sicherstellung`,

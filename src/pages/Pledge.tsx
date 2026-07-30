@@ -6,6 +6,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { useExternalSupabase } from "@/integrations/external/supabase";
 import { Download, FileSignature, RotateCcw, ShieldCheck } from "lucide-react";
 import { z } from "zod";
 
@@ -59,7 +61,10 @@ const schema = z.object({
 });
 
 const Pledge = () => {
+  const { user } = useAuth();
+  const supabase = useExternalSupabase();
   const [existing, setExisting] = useState<SignedPledge | null>(null);
+  const [fromApplication, setFromApplication] = useState(false);
   const [name, setName] = useState("");
   const [accepted, setAccepted] = useState<boolean[]>(commitments.map(() => false));
   const [error, setError] = useState<string>("");
@@ -71,15 +76,52 @@ const Pledge = () => {
       "content",
       "Die Sentinel-Selbstverpflichtung: sechs Punkte, privat unterzeichnet, jederzeit reversibel — Grundlage des BioSteward-Netzwerks.",
     );
-    const raw = localStorage.getItem(PLEDGE_KEY);
-    if (raw) {
-      try {
-        setExisting(JSON.parse(raw));
-      } catch {
-        /* ignore */
-      }
-    }
   }, []);
+
+  // Canonical source: the pledge signed inside the sentinel application
+  // (sentinel_applications.pledge_data). localStorage is only the fallback
+  // for visitors who haven't applied yet.
+  useEffect(() => {
+    if (!user) {
+      const raw = localStorage.getItem(PLEDGE_KEY);
+      if (raw) {
+        try {
+          setExisting(JSON.parse(raw));
+        } catch {
+          /* ignore */
+        }
+      }
+      return;
+    }
+    supabase
+      .from("sentinel_applications")
+      .select("full_name, pledge_data, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        const pd = (data as { full_name: string; pledge_data: { self_pledge?: boolean; signed_at?: string } | null; created_at: string } | null);
+        if (pd?.pledge_data?.self_pledge) {
+          setExisting({
+            signedName: pd.full_name,
+            signedAt: pd.pledge_data.signed_at ?? pd.created_at,
+            version: "1.0",
+            commitments: commitments.map((c) => `${c.n}. ${c.title}`),
+          });
+          setFromApplication(true);
+          return;
+        }
+        const raw = localStorage.getItem(PLEDGE_KEY);
+        if (raw) {
+          try {
+            setExisting(JSON.parse(raw));
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+  }, [user, supabase]);
 
   const allChecked = accepted.every(Boolean);
 
@@ -220,18 +262,20 @@ const Pledge = () => {
                       <Button onClick={onDownload} variant="outline" className="justify-start">
                         <Download className="mr-2 h-4 w-4" /> Kopie herunterladen
                       </Button>
-                      <Button
-                        onClick={onRevoke}
-                        variant="ghost"
-                        className="justify-start text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <RotateCcw className="mr-2 h-4 w-4" /> Pledge widerrufen
-                      </Button>
+                      {!fromApplication && (
+                        <Button
+                          onClick={onRevoke}
+                          variant="ghost"
+                          className="justify-start text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <RotateCcw className="mr-2 h-4 w-4" /> Pledge widerrufen
+                        </Button>
+                      )}
                     </div>
                     <p className="mt-6 text-xs text-muted-foreground">
-                      Die Pledge ist lokal in diesem Browser gespeichert. Bei
-                      vollständiger Sentinel-Aktivierung wird sie verschlüsselt
-                      im Custody-Netzwerk hinterlegt.
+                      {fromApplication
+                        ? "Diese Pledge ist Teil deines Sentinel-Antrags und im Custody-Netzwerk hinterlegt. Widerruf läuft über den Antrag selbst."
+                        : "Die Pledge ist lokal in diesem Browser gespeichert. Bei vollständiger Sentinel-Aktivierung wird sie verschlüsselt im Custody-Netzwerk hinterlegt."}
                     </p>
                   </>
                 ) : (

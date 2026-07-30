@@ -6,13 +6,16 @@
 //   content-type:   file mime
 //
 // Server-side guarantees (the client cannot bypass these):
-//  - Clerk JWT verified against JWKS; user_id taken from the token `sub`.
-//  - File type validated by MAGIC BYTES, not the client-claimed MIME.
+//  - Clerk JWT verified against JWKS (signature, iss, exp); user_id from `sub`.
+//  - Application must exist, belong to the caller, and still be reviewable
+//    (no overwriting KYC evidence after approval).
+//  - File type validated by MAGIC BYTES, not the client-claimed MIME; the
+//    stored content-type is derived from the sniffed type.
 //  - Hard size cap (10 MB).
 //  - Stored only under the caller's own folder: ${sub}/${applicationId}/${slot}.${ext}
 //
-// Storage write uses the service-role key, so the function is the single
-// trusted writer; the public storage policies remain as defense-in-depth.
+// Storage write uses the service-role key, so this function is the single
+// trusted writer; clients have no direct INSERT policy on the bucket.
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -42,6 +45,15 @@ function rateLimited(userId: string): boolean {
   return hits.length > RATE_MAX;
 }
 
+const EXT_MIME: Record<string, string> = {
+  jpg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  pdf: "application/pdf",
+  webp: "image/webp",
+  avif: "image/avif",
+};
+
 // Returns the canonical extension for a known-safe file, or null to reject.
 function sniffExt(bytes: Uint8Array): string | null {
   const s = (a: number[]) => a.every((b, i) => bytes[i] === b);
@@ -52,11 +64,22 @@ function sniffExt(bytes: Uint8Array): string | null {
   // RIFF....WEBP
   if (s([0x52, 0x49, 0x46, 0x46]) && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return "webp";
   // ftyp box: bytes[4..8]=="ftyp", bytes[8..12]=="avif"|"avis"
-  if (bytes.length > 12 && s([0x00, 0x00, 0x00, 0x18].slice(0, 0)) && String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]) === "ftyp") {
+  if (bytes.length > 12 && String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]) === "ftyp") {
     const brand = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
     if (brand === "avif" || brand === "avis") return "avif";
   }
   return null;
+}
+
+// ponytail: module-scope JWKS cache — see send-application-confirmation.
+let jwksCache: { at: number; keys: { kid?: string }[] } | null = null;
+async function getJwks(): Promise<{ kid?: string }[] | null> {
+  if (jwksCache && Date.now() - jwksCache.at < 10 * 60 * 1000) return jwksCache.keys;
+  const res = await fetch(`https://${CLERK_DOMAIN}/.well-known/jwks.json`);
+  if (!res.ok) return null;
+  const { keys } = await res.json();
+  jwksCache = { at: Date.now(), keys };
+  return keys;
 }
 
 async function verifyClerkToken(token: string): Promise<string | null> {
@@ -65,10 +88,11 @@ async function verifyClerkToken(token: string): Promise<string | null> {
     const header = JSON.parse(atob(headerB64.replace(/-/g, "+").replace(/_/g, "/")));
     const kid: string | undefined = header.kid;
     if (!kid) return null;
-    const jwksRes = await fetch(`https://${CLERK_DOMAIN}/.well-known/jwks.json`);
-    if (!jwksRes.ok) return null;
-    const { keys } = await jwksRes.json();
-    const jwk = keys.find((k: { kid?: string }) => k.kid === kid);
+    let jwk = (await getJwks())?.find((k) => k.kid === kid);
+    if (!jwk) {
+      jwksCache = null;
+      jwk = (await getJwks())?.find((k) => k.kid === kid);
+    }
     if (!jwk) return null;
     const cryptoKey = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
     const data = token.split(".").slice(0, 2).join(".");
@@ -77,12 +101,24 @@ async function verifyClerkToken(token: string): Promise<string | null> {
     const valid = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", cryptoKey, sigBytes, new TextEncoder().encode(data));
     if (!valid) return null;
     const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-    const now = Math.floor(Date.now() / 1000);
-    if (payload.exp && payload.exp < now) return null;
+    if (payload.iss !== `https://${CLERK_DOMAIN}`) return null;
+    if (typeof payload.exp !== "number" || payload.exp < Math.floor(Date.now() / 1000)) return null;
     return (payload.sub as string) ?? null;
   } catch {
     return null;
   }
+}
+
+// The caller must own the application and it must still be under review —
+// otherwise an approved user could overwrite reviewed KYC evidence.
+async function applicationWritable(applicationId: string, userId: string): Promise<boolean> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/sentinel_applications?id=eq.${applicationId}&user_id=eq.${userId}&select=status`,
+    { headers: { Authorization: `Bearer ${SERVICE_ROLE}`, apikey: SERVICE_ROLE } },
+  );
+  if (!res.ok) return false;
+  const rows = (await res.json()) as { status: string }[];
+  return rows.length === 1 && (rows[0].status === "pending" || rows[0].status === "under_review");
 }
 
 Deno.serve(async (req) => {
@@ -98,10 +134,14 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "rate limited" }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  const applicationId = req.headers.get("x-application-id");
+  const applicationId = req.headers.get("x-application-id") ?? "";
   const slot = req.headers.get("x-slot");
-  if (!applicationId || !/^(id_front|id_back|facility|selfie)$/.test(slot ?? "")) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(applicationId) || !/^(id_front|id_back|facility|selfie)$/.test(slot ?? "")) {
     return new Response(JSON.stringify({ error: "bad request" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  if (!(await applicationWritable(applicationId, userId))) {
+    return new Response(JSON.stringify({ error: "application not writable" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
   const buf = new Uint8Array(await req.arrayBuffer());
@@ -112,13 +152,12 @@ Deno.serve(async (req) => {
   if (!ext) return new Response(JSON.stringify({ error: "unsupported file type" }), { status: 415, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   const path = `${userId}/${applicationId}/${slot}.${ext}`;
-  const contentType = req.headers.get("content-type") ?? "application/octet-stream";
 
   const up = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${SERVICE_ROLE}`,
-      "Content-Type": contentType,
+      "Content-Type": EXT_MIME[ext],
       "x-upsert": "true",
       apikey: SERVICE_ROLE,
     },

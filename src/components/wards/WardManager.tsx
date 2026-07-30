@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { safeExtension } from "@/lib/uploads";
+import { sniffImage } from "@/lib/uploads";
 import { RegionSelect } from "@/components/RegionSelect";
 import { BUNDESLAENDER } from "@/lib/germanRegions";
 import { Plus, X, ImagePlus, PawPrint, MapPin } from "lucide-react";
@@ -83,6 +83,15 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
   const [pendingImages, setPendingImages] = useState<File[]>([]);
   const [carriedImages, setCarriedImages] = useState<string[]>([]);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+
+  // Object URLs live exactly as long as their File in pendingImages —
+  // creating them during render leaks a URL per render.
+  useEffect(() => {
+    const urls = pendingImages.map((f) => URL.createObjectURL(f));
+    setPreviewUrls(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [pendingImages]);
 
   const myWards = useMemo(
     () => wards.filter((w) => (shelterId ? w.shelter_id === shelterId : user && w.owner_id === user.id)),
@@ -127,10 +136,15 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
     setSubmitting(true);
     const uploadedPaths: string[] = [];
     for (const file of pendingImages) {
-      const ext = safeExtension(file);
-      const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+      const img = await sniffImage(file);
+      if (!img) {
+        setSubmitting(false);
+        toast({ title: "Ungültiges Bild", description: `${file.name}: nur JPG/PNG/WebP/GIF/AVIF bis 10 MB.`, variant: "destructive" });
+        return;
+      }
+      const path = `${user.id}/${crypto.randomUUID()}.${img.ext}`;
       const { error: upErr } = await supabase.storage
-        .from("ward-images").upload(path, file, { contentType: file.type, upsert: false });
+        .from("ward-images").upload(path, file, { contentType: img.mime, upsert: false });
       if (upErr) {
         setSubmitting(false);
         toast({ title: "Bild-Upload fehlgeschlagen", description: upErr.message, variant: "destructive" });
@@ -224,7 +238,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
               {carriedImages.map((path) => (
                 <div key={path} className="relative h-24 w-24 overflow-hidden border border-border bg-background">
                   {signedUrls[path]
-                    ? <img src={signedUrls[path]} alt="" className="h-full w-full object-cover" />
+                    ? <img src={signedUrls[path]} alt="Tierfoto Vorschau" className="h-full w-full object-cover" />
                     : <div className="h-full w-full animate-pulse bg-muted" />}
                   <button type="button" onClick={() => setCarriedImages((p) => p.filter((x) => x !== path))}
                     className="absolute right-1 top-1 rounded-full bg-background/90 p-1 hover:bg-destructive hover:text-destructive-foreground" aria-label="Bild entfernen">
@@ -232,9 +246,9 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
                   </button>
                 </div>
               ))}
-              {pendingImages.map((file, i) => (
+              {pendingImages.map((_file, i) => (
                 <div key={i} className="relative h-24 w-24 overflow-hidden border border-primary/40 bg-background">
-                  <img src={URL.createObjectURL(file)} alt="" className="h-full w-full object-cover" />
+                  {previewUrls[i] && <img src={previewUrls[i]} alt="Tierfoto Vorschau" className="h-full w-full object-cover" />}
                   <button type="button" onClick={() => setPendingImages((p) => p.filter((_, idx) => idx !== i))}
                     className="absolute right-1 top-1 rounded-full bg-background/90 p-1 hover:bg-destructive hover:text-destructive-foreground" aria-label="Bild entfernen">
                     <X className="h-3 w-3" />
@@ -271,7 +285,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
               {cover && (
                 <div className="mb-5 aspect-[16/10] w-full overflow-hidden border border-border bg-muted">
                   {signedUrls[cover]
-                    ? <img src={signedUrls[cover]} alt={w.common_name} className="h-full w-full object-cover" />
+                    ? <img src={signedUrls[cover]} alt={w.common_name} loading="lazy" className="h-full w-full object-cover" />
                     : <div className="h-full w-full animate-pulse bg-muted" />}
                 </div>
               )}

@@ -14,7 +14,7 @@ const de = {
     backHome: "← Zur Startseite",
     signIn: "Anmelden",
     signOut: "Abmelden",
-    account: "Konto",
+    account: "Profil",
   },
   auth: {
     title: "Zugang zum Custody-Netzwerk",
@@ -55,7 +55,7 @@ const de = {
       cta: "E-Mail zuerst bestätigen",
     },
     submitting: "Wird übermittelt…",
-    confirmEmail: "Eine Bestätigungs-E-Mail wurde an {{email}} gesendet.",
+    confirmEmail: "Deine Bewerbung ist eingegangen. Wir melden uns innerhalb von 5 Werktagen unter {{email}}.",
   },
   admin: {
     title: "Admin · Bewerbungen",
@@ -77,7 +77,7 @@ const de = {
   },
   account: {
     required: "Bitte melde dich an, um dein Konto zu verwalten.",
-    title: "Konto",
+    title: "Profil",
     danger: "Gefahrenbereich",
     deleteHint: "Löscht alle deine Daten (Profil, Bewerbungen, KYC-Dokumente) unwiderruflich gemäß DSGVO Art. 17.",
     deleteConfirm: "Wirklich unwiderruflich löschen? Alle deine Daten werden entfernt.",

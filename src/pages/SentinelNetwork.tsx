@@ -6,7 +6,8 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useToast } from "@/hooks/use-toast";
 import { Building2, MapPin, Clock, CheckCircle2, XCircle } from "lucide-react";
-import { fetchShelters, fetchMyRequests } from "@/lib/shelters";
+import { Button } from "@/components/ui/button";
+import { fetchShelters, fetchMyRequests, sendShelterRequest } from "@/lib/shelters";
 import type { Shelter, ShelterRequest } from "@/lib/types";
 
 const SentinelNetwork = () => {
@@ -16,6 +17,21 @@ const SentinelNetwork = () => {
   const [shelters, setShelters] = useState<Shelter[]>([]);
   const [requests, setRequests] = useState<ShelterRequest[]>([]);
   const [busy, setBusy] = useState(true);
+  const [applying, setApplying] = useState<string | null>(null);
+
+  const apply = async (shelterId: string) => {
+    if (!user) return;
+    setApplying(shelterId);
+    try {
+      await sendShelterRequest(supabase, { shelter_id: shelterId, sentinel_id: user.id, message: null });
+      toast({ title: "Anfrage gesendet" });
+      setRequests(await fetchMyRequests(supabase, user.id));
+    } catch (e) {
+      toast({ title: "Anfrage fehlgeschlagen", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setApplying(null);
+    }
+  };
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -91,15 +107,29 @@ const SentinelNetwork = () => {
                 <p className="mt-4 text-sm text-muted-foreground">Noch keine Einrichtungen erfasst.</p>
               ) : (
                 <ul className="mt-4 divide-y divide-border border border-border bg-surface">
-                  {shelters.map((s) => (
-                    <li key={s.id} className="flex items-center justify-between gap-4 px-5 py-4">
-                      <div className="min-w-0">
-                        <p className="font-medium">{s.name}</p>
-                        <p className="mt-1 flex items-center gap-1 truncate text-xs text-muted-foreground"><MapPin className="h-3 w-3" /> {s.region}</p>
-                      </div>
-                      <Link to={`/shelters/${s.id}`} className="shrink-0 font-mono text-[10px] uppercase tracking-[0.2em] text-primary hover:underline">Profil</Link>
-                    </li>
-                  ))}
+                  {shelters.map((s) => {
+                    const existing = requests.find((r) => r.shelter_id === s.id && r.status !== "declined");
+                    return (
+                      <li key={s.id} className="flex items-center justify-between gap-4 px-5 py-4">
+                        <div className="min-w-0">
+                          <Link to={`/shelters/${s.id}`} className="font-medium hover:text-primary transition-colors">{s.name}</Link>
+                          <p className="mt-1 flex items-center gap-1 truncate text-xs text-muted-foreground"><MapPin className="h-3 w-3" /> {s.region}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-3">
+                          {existing ? (
+                            <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                              {statusIcon(existing.status)} {existing.status}
+                            </span>
+                          ) : (
+                            <Button size="sm" variant="outline" disabled={applying === s.id} onClick={() => apply(s.id)}>
+                              {applying === s.id ? "Sende …" : "Bewerben"}
+                            </Button>
+                          )}
+                          <Link to={`/shelters/${s.id}`} className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary hover:underline">Profil</Link>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </section>

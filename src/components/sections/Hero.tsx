@@ -1,13 +1,17 @@
+import { lazy, Suspense } from "react";
 import heroImg from "@/assets/hero-evidence.jpg";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
-import PixelBlast from "@/components/backgrounds/PixelBlast";
+
+// three.js (~600KB) is decorative background — load it after first paint.
+const PixelBlast = lazy(() => import("@/components/backgrounds/PixelBlast"));
 
 export const Hero = () => {
   return (
     <section className="relative overflow-hidden hero-bg">
       <div className="absolute inset-0 z-0">
+        <Suspense fallback={null}>
         <PixelBlast
           color="#f2a92c"
           variant="circle"
@@ -21,6 +25,7 @@ export const Hero = () => {
           liquid={false}
           transparent={true}
         />
+        </Suspense>
       </div>
 
       <div className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-b from-[#09090B]/70 via-transparent to-[#09090B]" />
@@ -64,7 +69,7 @@ export const Hero = () => {
 
             <div className="mt-10 flex flex-wrap items-center gap-3">
               <Button asChild size="lg" className="h-12 bg-[#eab308] px-6 font-medium text-[#09090B] hover:bg-[#eab308]/90">
-                <Link to="/dashboard">
+                <Link to="/demo">
                   Behörden-Demo öffnen
                   <ArrowRight className="ml-1.5 h-4 w-4" />
                 </Link>

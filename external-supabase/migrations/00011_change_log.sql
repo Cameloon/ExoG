@@ -23,6 +23,10 @@ create policy "ChangeLog: admin select"
 
 revoke update, delete, insert on public.change_log from authenticated, service_role;
 
+-- SELECT is needed for the admin Änderungsprotokoll view. Never rely on
+-- Supabase default privileges — grant explicitly.
+grant select on public.change_log to authenticated;
+
 create or replace function public.log_change()
 returns trigger
 language plpgsql

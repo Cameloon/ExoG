@@ -5,8 +5,8 @@
  *  - KV-Boxen, Section-Header, Signatur-Blöcke
  *  - ZIP-Build mit PDF + JSON + MANIFEST
  */
-import jsPDF from "jspdf";
-import JSZip from "jszip";
+import type jsPDF from "jspdf";
+import type JSZip from "jszip";
 import { sign } from "@/lib/care-log-validation";
 
 export const DOC_KIT_VERSION = "1.0.0";
@@ -513,6 +513,8 @@ export async function downloadZip(
   manifestStr: string,
   attachments: Attachment[] = [],
 ) {
+  // ponytail: dynamic import — jszip only needed on export click
+  const { default: JSZip } = await import("jszip");
   const pdfName = `${baseName}.pdf`;
   const jsonName = `${baseName}.json`;
   const zip = new JSZip();

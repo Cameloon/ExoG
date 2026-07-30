@@ -1,4 +1,4 @@
-import jsPDF from "jspdf";
+import type jsPDF from "jspdf";
 import {
   DOC_KIT_VERSION,
   FlowCursor,
@@ -85,6 +85,7 @@ export function evaluateEligibility(
 }
 
 export async function exportAdoptionContract(input: AdoptionContractInput) {
+  const { default: jsPDF } = await import("jspdf");
   const eligibility = evaluateEligibility(input, input.caseRecord);
   const meta: DocMeta = {
     title: "Vermittlungs- / Adoptionsvertrag",

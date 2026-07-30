@@ -98,6 +98,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     syncProfile();
   }, [userLoaded, authLoaded, clerkUser, supabase]);
 
+  // Fallback region from profiles table (behoerde self-set, no Clerk edit needed).
+  const [profileRegion, setProfileRegion] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userLoaded || !clerkUser) { setProfileRegion(null); return; }
+    supabase.from("profiles").select("region").eq("id", clerkUser.id).maybeSingle()
+      .then(({ data }) => setProfileRegion((data as { region: string } | null)?.region ?? null));
+  }, [userLoaded, clerkUser, supabase]);
+
   // A shelter user may be granted access via an admin-approved
   // pending_shelter_requests row (no manual Clerk role step required).
   const [approvedShelter, setApprovedShelter] = useState(false);
@@ -193,14 +202,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       isBehoerde,
       isEinrichtung,
       isSentinel,
-      region: meta?.region ?? null,
+      region: meta?.region ?? profileRegion,
       role: appRole,
       loading: false,
       signOut: async () => {
         await clerk.signOut();
       },
     };
-  }, [userLoaded, authLoaded, clerkUser, clerk]);
+  }, [userLoaded, authLoaded, clerkUser, clerk, approvedShelter, sentinelApproved, profileRegion]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

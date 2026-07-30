@@ -1,4 +1,4 @@
-import jsPDF from "jspdf";
+import type jsPDF from "jspdf";
 import {
   DOC_KIT_VERSION,
   FlowCursor,
@@ -38,6 +38,7 @@ export type FoundAnimalInput = {
 };
 
 export async function exportFoundAnimalReport(input: FoundAnimalInput) {
+  const { default: jsPDF } = await import("jspdf");
   const meta: DocMeta = {
     title: "Fundtier-Meldung & Verwahrungsnachweis",
     subtitle: "Meldung gemäß §§ 965 ff. BGB i.V.m. TierSchG / BNatSchG",

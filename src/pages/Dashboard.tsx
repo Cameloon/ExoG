@@ -54,17 +54,6 @@ const Dashboard = () => {
                 </button>
               ))}
             </div>
-            <div className="hidden items-center gap-2 sm:flex">
-              <span className="h-1.5 w-1.5 bg-success animate-pulse-dot" />
-              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                Live · Sync vor 3s
-              </span>
-            </div>
-            {role === "authority" && (
-              <Button size="sm" className="h-8">
-                + Neue Akte
-              </Button>
-            )}
           </div>
         </div>
       </div>

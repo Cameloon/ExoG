@@ -566,6 +566,7 @@ html:not(.dark) {
    ───────────────────────────────────────────────────────────── */
 
 .dark {
+  .hero-bg .font-editorial { font-weight: 300 !important; }
   .text-\[\#eab308\] { color: hsl(var(--primary)) !important; }
   .text-\[\#eab308\]\/80 { color: hsl(var(--primary) / 0.85) !important; }
   .bg-\[\#eab308\] {

@@ -23,3 +23,7 @@ create policy "Audit: no delete"
 
 -- ponytail: even service_role/secret key cannot mutate the trail directly.
 revoke update, delete on public.application_audit_log from authenticated, service_role;
+
+-- SELECT is needed for the admin audit-trail view. Never rely on Supabase
+-- default privileges — grant explicitly.
+grant select on public.application_audit_log to authenticated;

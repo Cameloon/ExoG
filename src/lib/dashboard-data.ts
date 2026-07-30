@@ -1,7 +1,9 @@
 // Demo-Daten für die Plattform-Demo (Frontend-only).
 
 export type CaseStatus = "Intake" | "Triage" | "Transport" | "Pflege" | "Outcome";
-export type CitesAnnex = "A" | "B" | "C";
+// ponytail: string, not a union — demo uses A/B/C, live wards carry the real
+// CITES listing (I, II, III, I/II, …) from cites_species.
+export type CitesAnnex = string;
 export type RiskLevel = "kritisch" | "hoch" | "mittel" | "stabil";
 
 export interface CaseRecord {

@@ -1,4 +1,4 @@
-import jsPDF from "jspdf";
+import type jsPDF from "jspdf";
 import {
   DOC_KIT_VERSION,
   FlowCursor,
@@ -53,6 +53,7 @@ export type CitesHandoverInput = {
 };
 
 export async function exportCitesHandover(input: CitesHandoverInput) {
+  const { default: jsPDF } = await import("jspdf");
   const meta: DocMeta = {
     title: "CITES- / Herkunftsnachweis & Übergabeprotokoll",
     subtitle: `Übergabe gemäß BArtSchV i.V.m. EG-VO 338/97 (CITES Anhang ${input.caseRecord.cites})`,

@@ -14,6 +14,175 @@ export type Database = {
   }
   public: {
     Tables: {
+      // Hand-added until types are regenerated from the live project
+      // (migration 00014_care_logs.sql). Regenerate: supabase gen types.
+      care_logs: {
+        Row: {
+          id: string
+          ward_id: string
+          author_id: string
+          author_name: string
+          type: string
+          note: string
+          rationale: string
+          metrics: Json
+          prev_hash: string | null
+          hash: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          ward_id: string
+          author_id: string
+          author_name: string
+          type: string
+          note: string
+          rationale?: string
+          metrics?: Json
+          prev_hash?: string | null
+          hash: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          ward_id?: string
+          author_id?: string
+          author_name?: string
+          type?: string
+          note?: string
+          rationale?: string
+          metrics?: Json
+          prev_hash?: string | null
+          hash?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "care_logs_ward_id_fkey"
+            columns: ["ward_id"]
+            isOneToOne: false
+            referencedRelation: "ward_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      // Hand-added until types are regenerated from the live project
+      // (migration 00011_change_log.sql). Regenerate: supabase gen types.
+      change_log: {
+        Row: {
+          id: string
+          actor_id: string
+          action: string
+          table_name: string
+          record_id: string
+          changed_at: string
+        }
+        Insert: {
+          id?: string
+          actor_id: string
+          action: string
+          table_name: string
+          record_id: string
+          changed_at?: string
+        }
+        Update: {
+          id?: string
+          actor_id?: string
+          action?: string
+          table_name?: string
+          record_id?: string
+          changed_at?: string
+        }
+        Relationships: []
+      }
+      // Hand-added until types are regenerated from the live project
+      // (migration 00003_cites_species.sql). Regenerate: supabase gen types.
+      cites_species: {
+        Row: {
+          id: number
+          full_name: string
+          rank: string
+          class_name: string | null
+          order_name: string | null
+          family_name: string | null
+          genus_name: string | null
+          species_name: string | null
+          cites_accepted: boolean
+          english_names: string[]
+          current_listing: string | null
+          listing_changes: Json
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          full_name: string
+          rank: string
+          class_name?: string | null
+          order_name?: string | null
+          family_name?: string | null
+          genus_name?: string | null
+          species_name?: string | null
+          cites_accepted?: boolean
+          english_names?: string[]
+          current_listing?: string | null
+          listing_changes?: Json
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          full_name?: string
+          rank?: string
+          class_name?: string | null
+          order_name?: string | null
+          family_name?: string | null
+          genus_name?: string | null
+          species_name?: string | null
+          cites_accepted?: boolean
+          english_names?: string[]
+          current_listing?: string | null
+          listing_changes?: Json
+          created_at?: string
+        }
+        Relationships: []
+      }
+      // Hand-added until types are regenerated from the live project
+      // (migration 00016_staff_wards_and_duties.sql). Regenerate: supabase gen types.
+      duties: {
+        Row: {
+          id: string
+          owner_id: string
+          case_code: string | null
+          title: string
+          category: string
+          priority: string
+          due_at: string | null
+          done: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          owner_id: string
+          case_code?: string | null
+          title: string
+          category?: string
+          priority?: string
+          due_at?: string | null
+          done?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          owner_id?: string
+          case_code?: string | null
+          title?: string
+          category?: string
+          priority?: string
+          due_at?: string | null
+          done?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
       application_audit_log: {
         Row: {
           action: string
@@ -106,6 +275,8 @@ export type Database = {
           email: string | null
           id: string
           preferred_language: string | null
+          // ponytail: hand-added (00019_profiles_region.sql)
+          region: string | null
           updated_at: string
         }
         Insert: {
@@ -114,6 +285,7 @@ export type Database = {
           email?: string | null
           id: string
           preferred_language?: string | null
+          region?: string | null
           updated_at?: string
         }
         Update: {
@@ -122,6 +294,7 @@ export type Database = {
           email?: string | null
           id?: string
           preferred_language?: string | null
+          region?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -257,6 +430,8 @@ export type Database = {
           background: string
           care_requirements: string
           case_code: string
+          // Hand-added (00015_ward_cites_listing.sql) until types are regenerated.
+          cites_listing: string | null
           common_name: string
           created_at: string
           id: string
@@ -279,6 +454,7 @@ export type Database = {
           background: string
           care_requirements: string
           case_code: string
+          cites_listing?: string | null
           common_name: string
           created_at?: string
           id?: string
@@ -301,6 +477,7 @@ export type Database = {
           background?: string
           care_requirements?: string
           case_code?: string
+          cites_listing?: string | null
           common_name?: string
           created_at?: string
           id?: string

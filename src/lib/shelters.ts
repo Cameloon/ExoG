@@ -8,9 +8,22 @@ export async function fetchShelters(
 ): Promise<Shelter[]> {
   let q = supabase.from("shelters").select("*").order("created_at", { ascending: false });
   if (opts?.region) q = q.eq("region", opts.region);
-  const { data, error } = await q;
+  const { data, error } = await q.limit(200);
   if (error) throw error;
   return (data ?? []) as Shelter[];
+}
+
+export async function fetchShelter(
+  supabase: SupabaseClient<Database>,
+  id: string,
+): Promise<Shelter | null> {
+  const { data, error } = await supabase
+    .from("shelters")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return (data ?? null) as Shelter | null;
 }
 
 export async function fetchMyShelter(
@@ -47,7 +60,8 @@ export async function fetchWardsByRegion(
     .from("ward_listings")
     .select("*")
     .eq("region", region)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(200);
   if (error) throw error;
   return (data ?? []) as Ward[];
 }
@@ -60,7 +74,8 @@ export async function fetchShelterWards(
     .from("ward_listings")
     .select("*")
     .eq("shelter_id", shelterId)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(200);
   if (error) throw error;
   return (data ?? []) as Ward[];
 }
@@ -73,7 +88,8 @@ export async function fetchRequestsForShelter(
     .from("sentinel_shelter_requests")
     .select("*")
     .eq("shelter_id", shelterId)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(200);
   if (error) throw error;
   return (data ?? []) as ShelterRequest[];
 }
@@ -86,7 +102,8 @@ export async function fetchMyRequests(
     .from("sentinel_shelter_requests")
     .select("*")
     .eq("sentinel_id", sentinelId)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(200);
   if (error) throw error;
   return (data ?? []) as ShelterRequest[];
 }

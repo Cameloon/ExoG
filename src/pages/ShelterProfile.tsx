@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { PawPrint, MapPin, CheckCircle2 } from "lucide-react";
-import { fetchShelters, fetchShelterWards, fetchMyRequests, sendShelterRequest } from "@/lib/shelters";
+import { fetchShelter, fetchShelterWards, fetchMyRequests, sendShelterRequest } from "@/lib/shelters";
 import type { Shelter, Ward, ShelterRequest } from "@/lib/types";
 import { LazyShelterMap } from "@/components/shelters/LazyShelterMap";
 
@@ -32,8 +32,7 @@ const ShelterProfile = () => {
     if (!id) return;
     setBusy(true);
     try {
-      const all = await fetchShelters(supabase);
-      const s = all.find((x) => x.id === id) ?? null;
+      const s = await fetchShelter(supabase, id);
       setShelter(s);
       if (s) {
         const w = await fetchShelterWards(supabase, s.id);

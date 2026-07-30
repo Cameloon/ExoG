@@ -1,5 +1,5 @@
-import jsPDF from "jspdf";
-import JSZip from "jszip";
+import type jsPDF from "jspdf";
+import type JSZip from "jszip";
 import type { CaseRecord, CareLog, SentinelProfile } from "@/lib/dashboard-data";
 import { RATIONALE_RULES, validateRationale, sign } from "@/lib/care-log-validation";
 
@@ -202,7 +202,7 @@ function drawCoverPage(
   return { pageCountAnchor };
 }
 
-function buildPdf({ caseRecord, logs, sentinel }: ExportInput): Blob {
+function buildPdf({ caseRecord, logs, sentinel }: ExportInput, jsPDF: typeof import("jspdf").default): Blob {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -516,6 +516,11 @@ function buildManifest(input: ExportInput, fileNames: { pdf: string; json: strin
 }
 
 export async function exportCareLogsZip(input: ExportInput): Promise<void> {
+  // ponytail: dynamic import — jspdf/jszip are ~400KB and only needed on export click
+  const [{ default: jsPDF }, { default: JSZip }] = await Promise.all([
+    import("jspdf"),
+    import("jszip"),
+  ]);
   const safeId = input.caseRecord.id.replace(/[^A-Za-z0-9_-]/g, "_");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const baseName = `Pflegelog_${safeId}_${stamp}`;
@@ -523,7 +528,7 @@ export async function exportCareLogsZip(input: ExportInput): Promise<void> {
   const jsonName = `${baseName}.json`;
   const manifestName = "MANIFEST.txt";
 
-  const pdfBlob = buildPdf(input);
+  const pdfBlob = buildPdf(input, jsPDF);
   const jsonStr = buildJson(input);
   const manifestStr = buildManifest(input, { pdf: pdfName, json: jsonName });
 
