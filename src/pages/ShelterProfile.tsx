@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Button } from "@/components/ui/button";
+import { LoadingSnake } from "@/components/ui/loading-snake";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -76,7 +77,9 @@ const ShelterProfile = () => {
     return (
       <div className="min-h-screen bg-background text-muted-foreground">
         <SiteHeader />
-        <main className="container py-24 text-center">…</main>
+        <main className="container py-24 text-center">
+          <LoadingSnake label="Lade Einrichtung" />
+        </main>
       </div>
     );
   }

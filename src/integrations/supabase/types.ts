@@ -318,6 +318,8 @@ export type Database = {
           reviewer_notes: string | null
           species_focus: string | null
           status: Database["public"]["Enums"]["application_status"]
+          // Hand-added (00022_sentinel_tier.sql) until types are regenerated.
+          tier: string
           updated_at: string
           user_id: string
         }
@@ -339,6 +341,7 @@ export type Database = {
           reviewer_notes?: string | null
           species_focus?: string | null
           status?: Database["public"]["Enums"]["application_status"]
+          tier?: string
           updated_at?: string
           user_id: string
         }
@@ -360,6 +363,7 @@ export type Database = {
           reviewer_notes?: string | null
           species_focus?: string | null
           status?: Database["public"]["Enums"]["application_status"]
+          tier?: string
           updated_at?: string
           user_id?: string
         }
@@ -389,6 +393,7 @@ export type Database = {
       ward_interest: {
         Row: {
           applicant_id: string
+          consultation_requested: boolean
           created_at: string
           id: string
           message: string
@@ -398,6 +403,7 @@ export type Database = {
         }
         Insert: {
           applicant_id: string
+          consultation_requested?: boolean
           created_at?: string
           id?: string
           message: string
@@ -407,6 +413,7 @@ export type Database = {
         }
         Update: {
           applicant_id?: string
+          consultation_requested?: boolean
           created_at?: string
           id?: string
           message?: string
@@ -436,8 +443,14 @@ export type Database = {
           created_at: string
           id: string
           images: string[]
+          // Hand-added (00021_care_and_identification.sql) until types are regenerated.
+          lab_report_path: string | null
+          legal_custody: boolean
           origin_context: string | null
           owner_id: string
+          placement_type: Database["public"]["Enums"]["placement_type"]
+          quarantine_status: Database["public"]["Enums"]["quarantine_status"]
+          quarantine_until: string | null
           region: string | null
           shelter_id: string | null
           scientific_name: string | null
@@ -459,8 +472,13 @@ export type Database = {
           created_at?: string
           id?: string
           images?: string[]
+          lab_report_path?: string | null
+          legal_custody?: boolean
           origin_context?: string | null
           owner_id: string
+          placement_type?: Database["public"]["Enums"]["placement_type"]
+          quarantine_status?: Database["public"]["Enums"]["quarantine_status"]
+          quarantine_until?: string | null
           region?: string | null
           shelter_id?: string | null
           scientific_name?: string | null
@@ -482,8 +500,13 @@ export type Database = {
           created_at?: string
           id?: string
           images?: string[]
+          lab_report_path?: string | null
+          legal_custody?: boolean
           origin_context?: string | null
           owner_id?: string
+          placement_type?: Database["public"]["Enums"]["placement_type"]
+          quarantine_status?: Database["public"]["Enums"]["quarantine_status"]
+          quarantine_until?: string | null
           region?: string | null
           shelter_id?: string | null
           scientific_name?: string | null
@@ -494,6 +517,123 @@ export type Database = {
           updated_at?: string
           urgency?: string
           visibility?: Database["public"]["Enums"]["ward_visibility"]
+        }
+        Relationships: []
+      }
+      identification_requests: {
+        Row: {
+          common_name: string
+          confirmed_listing: string | null
+          confirmed_species: string | null
+          created_at: string
+          created_by: string
+          description: string
+          id: string
+          notes: string
+          photos: string[]
+          region: string | null
+          status: Database["public"]["Enums"]["id_request_status"]
+          updated_at: string
+        }
+        Insert: {
+          common_name: string
+          confirmed_listing?: string | null
+          confirmed_species?: string | null
+          created_at?: string
+          created_by: string
+          description?: string
+          id?: string
+          notes?: string
+          photos?: string[]
+          region?: string | null
+          status?: Database["public"]["Enums"]["id_request_status"]
+          updated_at?: string
+        }
+        Update: {
+          common_name?: string
+          confirmed_listing?: string | null
+          confirmed_species?: string | null
+          created_at?: string
+          created_by?: string
+          description?: string
+          id?: string
+          notes?: string
+          photos?: string[]
+          region?: string | null
+          status?: Database["public"]["Enums"]["id_request_status"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      identification_votes: {
+        Row: {
+          confidence: string
+          created_at: string
+          expert_id: string
+          id: string
+          listing: string | null
+          note: string
+          request_id: string
+          species: string
+        }
+        Insert: {
+          confidence: string
+          created_at?: string
+          expert_id: string
+          id?: string
+          listing?: string | null
+          note?: string
+          request_id: string
+          species: string
+        }
+        Update: {
+          confidence?: string
+          created_at?: string
+          expert_id?: string
+          id?: string
+          listing?: string | null
+          note?: string
+          request_id?: string
+          species?: string
+        }
+        Relationships: []
+      }
+      transport_logs: {
+        Row: {
+          carrier: string
+          checklist: string[]
+          created_at: string
+          from_location: string
+          handler_id: string
+          id: string
+          mode: string
+          notes: string
+          to_location: string
+          ward_id: string
+        }
+        Insert: {
+          carrier?: string
+          checklist?: string[]
+          created_at?: string
+          from_location?: string
+          handler_id: string
+          id?: string
+          mode?: string
+          notes?: string
+          to_location?: string
+          ward_id: string
+        }
+        Update: {
+          carrier?: string
+          checklist?: string[]
+          created_at?: string
+          from_location?: string
+          handler_id?: string
+          id?: string
+          mode?: string
+          notes?: string
+          to_location?: string
+          ward_id?: string
         }
         Relationships: []
       }
@@ -622,19 +762,104 @@ export type Database = {
         }
         Relationships: []
       }
+      role_change_log: {
+        Row: {
+          id: string
+          actor_id: string
+          target_user_id: string
+          role: string
+          region: string | null
+          changed_at: string
+        }
+        Insert: {
+          id?: string
+          actor_id: string
+          target_user_id: string
+          role: string
+          region?: string | null
+          changed_at?: string
+        }
+        Update: {
+          id?: string
+          actor_id?: string
+          target_user_id?: string
+          role?: string
+          region?: string | null
+          changed_at?: string
+        }
+        Relationships: []
+      }
+      sentinel_change_requests: {
+        Row: {
+          id: string
+          user_id: string
+          requested: Json
+          status: string
+          reviewer_notes: string | null
+          reviewed_by: string | null
+          reviewed_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          requested: Json
+          status?: string
+          reviewer_notes?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          requested?: Json
+          status?: string
+          reviewer_notes?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      append_care_log: {
+        Args: {
+          p_ward_id: string
+          p_author_name: string
+          p_type: string
+          p_note: string
+          p_rationale: string
+          p_metrics?: Json
+        }
+        Returns: {
+          ward_id: string
+          author_name: string
+          type: string
+          note: string
+          rationale: string
+          metrics: Json
+          hash: string
+          created_at: string
+        }[]
+      }
       has_role: {
         Args: {
-          _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
+          _role: string
         }
         Returns: boolean
       }
       is_approved_sentinel: { Args: { _user_id: string }; Returns: boolean }
+      is_expert: { Args: { _user_id: string }; Returns: boolean }
+      is_gov: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
@@ -651,6 +876,9 @@ export type Database = {
         | "matched"
       ward_status: "available" | "under_review" | "placed" | "withdrawn"
       ward_visibility: "vetted_only" | "admin_only"
+      placement_type: "endstelle" | "pflegestelle"
+      quarantine_status: "unknown" | "in_quarantine" | "quarantine_safe" | "suspected"
+      id_request_status: "open" | "confirmed" | "closed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -790,6 +1018,14 @@ export const Constants = {
       ],
       ward_status: ["available", "under_review", "placed", "withdrawn"],
       ward_visibility: ["vetted_only", "admin_only"],
+      placement_type: ["endstelle", "pflegestelle"],
+      quarantine_status: [
+        "unknown",
+        "in_quarantine",
+        "quarantine_safe",
+        "suspected",
+      ],
+      id_request_status: ["open", "confirmed", "closed"],
     },
   },
 } as const

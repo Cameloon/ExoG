@@ -30,6 +30,8 @@ interface AuthContextValue {
   isBehoerde: boolean;
   isEinrichtung: boolean;
   isSentinel: boolean;
+  /** Top-tier sentinel (S4) — may vote in the Bestimmungshilfe queue. */
+  isExpert: boolean;
   /** The user's responsible region/area (Behörde scope, shelter region). */
   region: string | null;
   /** Coarse role used for routing/guards. */
@@ -44,9 +46,10 @@ interface AuthContextValue {
   isBehoerde: false,
   isEinrichtung: false,
   isSentinel: false,
+  isExpert: false,
   region: null,
   role: "user",
-  loading: true,
+  loading: false,
   signOut: async () => {},
 });
 
@@ -98,7 +101,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     syncProfile();
   }, [userLoaded, authLoaded, clerkUser, supabase]);
 
-  // Fallback region from profiles table (behoerde self-set, no Clerk edit needed).
+  // Fallback region from profiles table when admins assign region there instead of Clerk metadata.
   const [profileRegion, setProfileRegion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -109,46 +112,65 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // A shelter user may be granted access via an admin-approved
   // pending_shelter_requests row (no manual Clerk role step required).
+  // ponytail: .maybeSingle() previously errored on duplicate rows (the table
+  // had no unique constraint → client upserts created dupes) and on a stale
+  // token right after refresh, silently dropping approvedShelter to false →
+  // the Wards gate kicked the user out ("Sentinel-Pfad") after reload.
+  // Now: order+limit, and retry transient failures instead of failing once.
   const [approvedShelter, setApprovedShelter] = useState(false);
+  useEffect(() => {
+    if (!userLoaded || !clerkUser) { setApprovedShelter(false); return; }
+    let cancelled = false;
+    void (async () => {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const { data, error } = await supabase
+          .from("pending_shelter_requests")
+          .select("status")
+          .eq("user_id", clerkUser.id)
+          .eq("status", "approved")
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (!error) {
+          if (!cancelled) setApprovedShelter(Boolean(data));
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userLoaded, clerkUser, supabase]);
   const [sentinelApproved, setSentinelApproved] = useState(false);
+  const [sentinelTier, setSentinelTier] = useState<string | null>(null);
   useEffect(() => {
     if (!userLoaded || !clerkUser) {
       setApprovedShelter(false);
       setSentinelApproved(false);
+      setSentinelTier(null);
       return;
     }
     const meta = clerkUser.publicMetadata as { role?: string } | null;
-    if (meta?.role === "einrichtung" || meta?.role === "shelter") {
-      setApprovedShelter(true);
-      return;
-    }
-    supabase
-      .from("pending_shelter_requests")
-      .select("status")
-      .eq("user_id", clerkUser.id)
-      .maybeSingle()
-      .then(({ data }) =>
-        setApprovedShelter((data as { status: string } | null)?.status === "approved"),
-      );
-  }, [userLoaded, clerkUser, supabase]);
-
-  useEffect(() => {
-    if (!userLoaded || !clerkUser) {
-      setSentinelApproved(false);
-      return;
-    }
-    const meta = clerkUser.publicMetadata as { role?: string } | null;
-    if (meta?.role === "sentinel") {
-      setSentinelApproved(true);
-      return;
-    }
-    supabase
-      .from("sentinel_applications")
-      .select("status")
-      .eq("user_id", clerkUser.id)
-      .eq("status", "approved")
-      .maybeSingle()
-      .then(({ data }) => setSentinelApproved(Boolean(data)));
+    let cancelled = false;
+    void (async () => {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const { data, error } = await supabase
+          .from("sentinel_applications")
+          .select("status, tier")
+          .eq("user_id", clerkUser.id)
+          .eq("status", "approved")
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (!error) {
+          if (!cancelled) {
+            const approved = Boolean(data) || meta?.role === "sentinel";
+            setSentinelApproved(approved);
+            setSentinelTier((data as { tier?: string | null }[] | null)?.[0]?.tier ?? null);
+          }
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+      }
+    })();
+    return () => { cancelled = true; };
   }, [userLoaded, clerkUser, supabase]);
 
   const value = useMemo<AuthContextValue>(() => {
@@ -160,6 +182,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isBehoerde: false,
         isEinrichtung: approvedShelter,
         isSentinel: false,
+        isExpert: false,
         region: null,
         role: "user",
         loading,
@@ -175,16 +198,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const role = meta?.role;
     const isAdmin = role === "admin";
     const isBehoerde = role === "behoerde" || role === "gov";
-    const isEinrichtung = role === "einrichtung" || role === "shelter" || approvedShelter;
+    // A sentinel may be approved for shelter-network membership too; that must
+    // NOT flip them to einrichtung — the approved-shelter fallback only
+    // applies to accounts with no other identity (no Clerk role, no sentinel
+    // application). Explicit einrichtung/shelter roles always win.
+    const isEinrichtung = role === "einrichtung" || role === "shelter" || (approvedShelter && !role && !sentinelApproved);
     const isSentinel = role === "sentinel" || sentinelApproved;
+    const isExpert = isSentinel && sentinelTier === "S4";
     const appRole: AppRole = isAdmin
       ? "admin"
-      : isSentinel
-        ? "sentinel"
-        : isBehoerde
-          ? "behoerde"
-          : isEinrichtung
-            ? "einrichtung"
+      : isBehoerde
+        ? "behoerde"
+        : isEinrichtung
+          ? "einrichtung"
+          : isSentinel
+            ? "sentinel"
             : "user";
     return {
       user: {
@@ -202,6 +230,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       isBehoerde,
       isEinrichtung,
       isSentinel,
+      isExpert,
       region: meta?.region ?? profileRegion,
       role: appRole,
       loading: false,
@@ -209,8 +238,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         await clerk.signOut();
       },
     };
-  }, [userLoaded, authLoaded, clerkUser, clerk, approvedShelter, sentinelApproved, profileRegion]);
-
+  }, [userLoaded, authLoaded, clerkUser, clerk, approvedShelter, sentinelApproved, sentinelTier, profileRegion]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 

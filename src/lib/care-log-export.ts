@@ -25,8 +25,6 @@ const SENDER = {
   registry: "AG Berlin-Charlottenburg, HRB 274519 B",
 };
 
-const nowIso = () => new Date().toISOString();
-
 /** Kurzer, deterministischer Dokument-Hash zur Wiedererkennung */
 function docHash(input: ExportInput): string {
   const payload = `${input.caseRecord.id}|${input.logs.length}|${input.logs.map((l) => l.ts + l.type).join(",")}`;
@@ -202,14 +200,13 @@ function drawCoverPage(
   return { pageCountAnchor };
 }
 
-function buildPdf({ caseRecord, logs, sentinel }: ExportInput, jsPDF: typeof import("jspdf").default): Blob {
+function buildPdf({ caseRecord, logs, sentinel }: ExportInput, jsPDF: typeof import("jspdf").default, generatedAt: string): Blob {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 48;
 
   // 1) Deckblatt zuerst rendern
-  const generatedAt = nowIso();
   const docId = docHash({ caseRecord, logs, sentinel });
   const coverLayout = drawCoverPage(doc, { caseRecord, logs, sentinel }, {
     version: EXPORT_DOC_VERSION,
@@ -236,7 +233,7 @@ function buildPdf({ caseRecord, logs, sentinel }: ExportInput, jsPDF: typeof imp
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(90);
-  doc.text(`Aktenzeichen: ${caseRecord.id}    ·    Erstellt: ${nowIso()}`, margin, y);
+  doc.text(`Aktenzeichen: ${caseRecord.id}    ·    Erstellt: ${generatedAt}`, margin, y);
   y += 10;
   doc.text(
     `Sentinel: ${sentinel.name} (${sentinel.tier}, Region ${sentinel.region})`,
@@ -275,7 +272,7 @@ function buildPdf({ caseRecord, logs, sentinel }: ExportInput, jsPDF: typeof imp
   y += 6;
 
   // Validation summary
-  const validations = logs.map((l) => ({ log: l, v: validateRationale(l.type, l.rationale ?? "") }));
+  const validations = logs.map((l) => ({ log: l, v: validateRationale(l.type, l.rationale ?? "", l.metrics) }));
   const okCount = validations.filter((x) => x.v.ok).length;
   const failCount = validations.length - okCount;
 
@@ -306,7 +303,6 @@ function buildPdf({ caseRecord, logs, sentinel }: ExportInput, jsPDF: typeof imp
 
   validations.forEach(({ log, v }, i) => {
     ensureSpace(110);
-    const rule = RATIONALE_RULES[log.type];
 
     // Header row
     doc.setFillColor(245, 245, 245);
@@ -426,9 +422,9 @@ function buildPdf({ caseRecord, logs, sentinel }: ExportInput, jsPDF: typeof imp
   return doc.output("blob");
 }
 
-function buildJson({ caseRecord, logs, sentinel }: ExportInput): string {
+function buildJson({ caseRecord, logs, sentinel }: ExportInput, generatedAt: string): string {
   const validations = logs.map((log) => {
-    const v = validateRationale(log.type, log.rationale ?? "");
+    const v = validateRationale(log.type, log.rationale ?? "", log.metrics);
     const sigPayload = `${caseRecord.id}|${log.type}|${log.note}|${log.rationale ?? ""}|${log.author}|${log.ts}`;
     return {
       ts: log.ts,
@@ -460,7 +456,7 @@ function buildJson({ caseRecord, logs, sentinel }: ExportInput): string {
       schema: "exoguard.care-log.export/1.0",
       documentVersion: EXPORT_DOC_VERSION,
       documentId: docHash({ caseRecord, logs, sentinel }),
-      generatedAt: nowIso(),
+      generatedAt,
       sender: SENDER,
       confidentiality: {
         classification: "VERTRAULICH — Behördlicher Gebrauch",
@@ -478,7 +474,7 @@ function buildJson({ caseRecord, logs, sentinel }: ExportInput): string {
   );
 }
 
-function buildManifest(input: ExportInput, fileNames: { pdf: string; json: string }) {
+function buildManifest(input: ExportInput, fileNames: { pdf: string; json: string }, generatedAt: string) {
   return [
     "ExoGuard / BioSteward — Export-Manifest",
     "----------------------------------------",
@@ -488,7 +484,7 @@ function buildManifest(input: ExportInput, fileNames: { pdf: string; json: strin
     `Tier:           ${input.caseRecord.german} (${input.caseRecord.species})`,
     `CITES Anhang:   ${input.caseRecord.cites}`,
     `Sentinel:       ${input.sentinel.name} (${input.sentinel.tier})`,
-    `Erstellt:       ${nowIso()}`,
+    `Erstellt:       ${generatedAt}`,
     `Einträge:       ${input.logs.length}`,
     "",
     "Absender / Verantwortliche Stelle:",
@@ -522,15 +518,16 @@ export async function exportCareLogsZip(input: ExportInput): Promise<void> {
     import("jszip"),
   ]);
   const safeId = input.caseRecord.id.replace(/[^A-Za-z0-9_-]/g, "_");
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const generatedAt = new Date().toISOString();
+  const stamp = generatedAt.replace(/[:.]/g, "-");
   const baseName = `Pflegelog_${safeId}_${stamp}`;
   const pdfName = `${baseName}.pdf`;
   const jsonName = `${baseName}.json`;
   const manifestName = "MANIFEST.txt";
 
-  const pdfBlob = buildPdf(input, jsPDF);
-  const jsonStr = buildJson(input);
-  const manifestStr = buildManifest(input, { pdf: pdfName, json: jsonName });
+  const pdfBlob = buildPdf(input, jsPDF, generatedAt);
+  const jsonStr = buildJson(input, generatedAt);
+  const manifestStr = buildManifest(input, { pdf: pdfName, json: jsonName }, generatedAt);
 
   const zip = new JSZip();
   zip.file(pdfName, pdfBlob);

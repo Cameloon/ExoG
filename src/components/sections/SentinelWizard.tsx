@@ -10,22 +10,48 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/hooks/use-toast";
 import { ArrowLeft, ArrowRight, CheckCircle2, FileCheck2, MailCheck, Pencil, RefreshCw, ShieldCheck, Upload, X } from "lucide-react";
 import { useUser, useAuth as useClerkAuth } from "@clerk/clerk-react";
-import { useExternalSupabase } from "@/integrations/external/supabase";
 import { EXTERNAL_CONFIG } from "@/config/external";
 import { useAuth } from "@/hooks/useAuth";
 import { RegionSelect } from "@/components/RegionSelect";
 import { BUNDESLAENDER } from "@/lib/germanRegions";
 import { HABITAT_CATEGORIES, parseCapacity, totalCapacity } from "@/lib/habitats";
 
+// §11c TSchG: Abgabe an unter 16-Jährige nur mit Einwilligung der
+// Erziehungsberechtigten — für das Custody-Netzwerk heißt das: ab 16.
+const ageFrom = (iso: string): number => {
+  const dob = new Date(iso);
+  if (Number.isNaN(dob.getTime())) return -1;
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  if (now.getMonth() < dob.getMonth() || (now.getMonth() === dob.getMonth() && now.getDate() < dob.getDate())) age--;
+  return age;
+};
+
 const schema = z.object({
   fullName: z.string().trim().min(2, "Bitte vollständigen Namen angeben").max(120),
   email: z.string().trim().email("Ungültige E-Mail").max(255),
   region: z.string().trim().min(2, "Region/Bundesland angeben").max(80),
+  street: z.string().trim().min(2, "Straße angeben").max(160),
+  houseNumber: z.string().trim().min(1, "Hausnummer angeben").max(20),
+  zip: z.string().trim().regex(/^\d{5}$/, "5-stellige PLZ angeben"),
+  city: z.string().trim().min(2, "Wohnort angeben").max(120),
+  phone: z.string().trim().min(5, "Telefonnummer angeben").max(40),
+  birthDate: z.string().min(1, "Geburtsdatum angeben").refine((v) => ageFrom(v) >= 16, "Tierabgabe erst ab 16 Jahren (§11c TSchG)"),
   yearsKeeping: z.coerce.number().min(0, "Ungültig").max(80),
   species: z.string().trim().min(3, "Bitte mindestens eine Spezies/Gruppe nennen").max(500),
   capacity: z.string().trim().min(1, "Kapazität angeben").max(500),
   quarantine: z.enum(["yes", "partial", "no"], { errorMap: () => ({ message: "Bitte auswählen" }) }),
   vetContact: z.string().trim().min(2, "Tierarztkontakt erforderlich").max(200),
+  enclosureSize: z.string().trim().min(2, "Maße angeben").max(200),
+  enclosureLighting: z.string().trim().min(2, "Beleuchtung angeben").max(200),
+  enclosureClimate: z.string().trim().min(2, "Temperatur/Luftfeuchtigkeit angeben").max(200),
+  enclosureSetup: z.string().trim().min(2, "Einrichtung angeben").max(500),
+  currentStock: z.string().trim().max(500),
+  feeding: z.string().trim().min(3, "Fütterung beschreiben").max(500),
+  overwintering: z.string().trim().max(300),
+  infoSources: z.array(z.string()).min(1, "Bitte mindestens eine Quelle wählen"),
+  sachkunde: z.enum(["none", "bna", "dght", "other"], { errorMap: () => ({ message: "Bitte auswählen" }) }),
+  sachkundeDetail: z.string().trim().max(200),
   motivation: z.string().trim().min(40, "Bitte mindestens 40 Zeichen.").max(2000),
   p_noTrade: z.literal(true, { errorMap: () => ({ message: "Erforderlich" }) }),
   p_temporary: z.literal(true, { errorMap: () => ({ message: "Erforderlich" }) }),
@@ -37,11 +63,18 @@ const schema = z.object({
     errorMap: () => ({ message: "Ohne Selbstverpflichtung keine Einreichung." }),
   }),
 });
+// ponytail: cross-field rule (sachkunde=other → detail required) lives outside
+// the schema — .refine() would turn it into ZodEffects and break schema.pick()
+// in validateStep. Checked in validateStep/onSubmit instead.
 
 type FormState = {
   fullName: string; email: string; region: string;
+  street: string; houseNumber: string; zip: string; city: string; phone: string; birthDate: string;
   yearsKeeping: string; species: string; capacity: string;
   quarantine: "yes" | "partial" | "no" | ""; vetContact: string;
+  enclosureSize: string; enclosureLighting: string; enclosureClimate: string; enclosureSetup: string;
+  currentStock: string; feeding: string; overwintering: string;
+  infoSources: string[]; sachkunde: "none" | "bna" | "dght" | "other" | ""; sachkundeDetail: string;
   motivation: string;
   p_noTrade: boolean; p_temporary: boolean; p_animalFirst: boolean;
   p_transparency: boolean; p_handover: boolean; p_truthful: boolean;
@@ -50,12 +83,26 @@ type FormState = {
 
 const initial: FormState = {
   fullName: "", email: "", region: "",
+  street: "", houseNumber: "", zip: "", city: "", phone: "", birthDate: "",
   yearsKeeping: "", species: "", capacity: "",
-  quarantine: "", vetContact: "", motivation: "",
+  quarantine: "", vetContact: "",
+  enclosureSize: "", enclosureLighting: "", enclosureClimate: "", enclosureSetup: "",
+  currentStock: "", feeding: "", overwintering: "",
+  infoSources: [], sachkunde: "", sachkundeDetail: "",
+  motivation: "",
   p_noTrade: false, p_temporary: false, p_animalFirst: false,
   p_transparency: false, p_handover: false, p_truthful: false,
   selfPledge: false,
 };
+
+const INFO_SOURCES = [
+  "Literatur", "Internet", "Zoohandlung", "Züchter", "Terraristikverein",
+  "Sachkundige Person", "Langjährige praktische Erfahrung", "Freunde/Bekannte", "Bisher nicht informiert",
+];
+
+const SACHKUNDE_OPTIONS = [
+  ["none", "Keiner"], ["bna", "BNA"], ["dght", "DGHT"], ["other", "Sonstige"],
+] as const;
 
 const steps = [
   { id: 1, label: "Identität" },
@@ -76,9 +123,9 @@ const PLEDGES: { key: keyof FormState; text: string }[] = [
 ];
 
 const fieldsByStep: Record<number, (keyof FormState)[]> = {
-  1: ["fullName", "email", "region"],
+  1: ["fullName", "email", "region", "street", "houseNumber", "zip", "city", "phone", "birthDate"],
   2: ["yearsKeeping", "species", "capacity", "quarantine", "vetContact"],
-  3: ["motivation"],
+  3: ["enclosureSize", "enclosureLighting", "enclosureClimate", "enclosureSetup", "currentStock", "feeding", "overwintering", "infoSources", "sachkunde", "motivation"],
   4: [],
   5: ["p_noTrade", "p_temporary", "p_animalFirst", "p_transparency", "p_handover", "p_truthful"],
   6: ["selfPledge"],
@@ -93,7 +140,6 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
   const { user, loading } = useAuth();
   const { user: clerkUser } = useUser();
   const { getToken } = useClerkAuth();
-  const supabase = useExternalSupabase();
   const [resending, setResending] = useState(false);
 
   const [data, setData] = useState<FormState>(initial);
@@ -113,6 +159,43 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
 
   // Redirect target after finishing (where the user came from)
   const after = (location.state as { from?: string } | null)?.from ?? "/dashboard";
+
+  // Draft survives accidental reloads: fields + step are snapshotted to
+  // sessionStorage per user. Files are skipped (can't serialize) — the docs
+  // step re-asks for them.
+  const draftKey = () => `exog-sentinel-draft:${user?.id ?? "anon"}`;
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const raw = sessionStorage.getItem(draftKey());
+      if (!raw) return;
+      const saved = JSON.parse(raw) as {
+        data?: FormState; step?: number; regState?: string; regDistrict?: string;
+        capMap?: Record<string, number>; introAccepted?: boolean;
+      };
+      if (saved.data) setData((d) => ({ ...initial, ...saved.data, email: d.email || saved.data?.email || "" }));
+      if (typeof saved.step === "number" && saved.step >= 0 && saved.step <= steps.length) setStep(saved.step);
+      if (saved.regState) setRegState(saved.regState);
+      if (saved.regDistrict !== undefined) setRegDistrict(saved.regDistrict);
+      if (saved.capMap) setCapMap(saved.capMap);
+      if (saved.introAccepted) setIntroAccepted(true);
+    } catch {
+      // malformed draft — start fresh
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || done) return;
+    const snap = JSON.stringify({ data, step, regState, regDistrict, capMap, introAccepted });
+    try { sessionStorage.setItem(draftKey(), snap); } catch { /* quota */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, data, step, regState, regDistrict, capMap, introAccepted, done]);
+
+  useEffect(() => {
+    if (done && user?.id) sessionStorage.removeItem(draftKey());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done, user?.id]);
 
   useEffect(() => {
     if (user?.email && !data.email) setData((d) => ({ ...d, email: user.email ?? "" }));
@@ -140,12 +223,14 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
     for (const f of fields) partial[f] = data[f];
     const partialSchema = schema.pick(Object.fromEntries(fields.map((f) => [f, true])) as never);
     const result = partialSchema.safeParse(partial);
+    const next: Record<string, string> = {};
     if (!result.success) {
-      const next: Record<string, string> = {};
       for (const issue of result.error.issues) next[issue.path[0] as string] = issue.message;
-      setErrors(next);
-      return false;
     }
+    if (n === 3 && data.sachkunde === "other" && data.sachkundeDetail.trim().length < 2) {
+      next.sachkundeDetail = "Welcher Sachkundenachweis?";
+    }
+    if (Object.keys(next).length > 0) { setErrors(next); return false; }
     return true;
   };
 
@@ -168,9 +253,14 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
       return;
     }
     const full = schema.safeParse({ ...data, yearsKeeping: Number(data.yearsKeeping || 0) });
+    const next: Record<string, string> = {};
     if (!full.success) {
-      const next: Record<string, string> = {};
       for (const issue of full.error.issues) next[issue.path[0] as string] = issue.message;
+    }
+    if (data.sachkunde === "other" && data.sachkundeDetail.trim().length < 2) {
+      next.sachkundeDetail = "Welcher Sachkundenachweis?";
+    }
+    if (Object.keys(next).length > 0) {
       setErrors(next);
       for (const s of steps) {
         const fields = fieldsByStep[s.id];
@@ -183,64 +273,63 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
 
     setSubmitting(true);
     try {
-      const id = `ST-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-      const { data: app, error: appErr } = await supabase
-        .from("sentinel_applications")
-        .insert({
-          user_id: user.id, case_id: id, full_name: data.fullName, email: data.email,
-          region: data.region, experience_years: Number(data.yearsKeeping), species_focus: data.species,
-          capacity: data.capacity, motivation: data.motivation, preferred_language: "de",
-          pledge_data: {
-            quarantine: data.quarantine, vet_contact: data.vetContact,
-            commitments: {
-              no_trade: data.p_noTrade, temporary: data.p_temporary, animal_first: data.p_animalFirst,
-              transparency: data.p_transparency, handover: data.p_handover, truthful: data.p_truthful,
-            },
-            self_pledge: data.selfPledge, signed_at: new Date().toISOString(),
-          },
-          kyc_status: "documents_uploaded",
-        })
-        .select("id, case_id").single();
-      if (appErr) throw appErr;
-
       const clerkToken = await getToken();
-      const uploads: { slot: DocSlot; file: File }[] = [];
-      if (docs.id_front) uploads.push({ slot: "id_front", file: docs.id_front });
-      if (docs.id_back) uploads.push({ slot: "id_back", file: docs.id_back });
-      if (docs.selfie) uploads.push({ slot: "selfie", file: docs.selfie });
-      if (docs.facility) uploads.push({ slot: "facility", file: docs.facility });
-
-      for (const u of uploads) {
-        const res = await fetch(`${EXTERNAL_CONFIG.SUPABASE_URL}/functions/v1/kyc-upload`, {
-          method: "POST",
-          headers: {
-            "Content-Type": u.file.type || "application/octet-stream",
-            Authorization: `Bearer ${clerkToken}`,
-            "x-application-id": app.id,
-            "x-slot": u.slot,
+      const form = new FormData();
+      form.set("payload", JSON.stringify({
+        fullName: data.fullName,
+        email: data.email,
+        region: data.region,
+        yearsKeeping: Number(data.yearsKeeping),
+        species: data.species,
+        capacity: data.capacity,
+        quarantine: data.quarantine,
+        vetContact: data.vetContact,
+        motivation: data.motivation,
+        questionnaire: {
+          street: data.street,
+          house_number: data.houseNumber,
+          zip: data.zip,
+          city: data.city,
+          phone: data.phone,
+          birth_date: data.birthDate,
+          enclosure: {
+            size: data.enclosureSize,
+            lighting: data.enclosureLighting,
+            climate: data.enclosureClimate,
+            setup: data.enclosureSetup,
           },
-          body: u.file,
-        });
-        if (!res.ok) {
-          const msg = (await res.json().catch(() => ({})))?.error ?? "Upload abgelehnt";
-          throw new Error(msg);
-        }
-        const { path } = (await res.json()) as { path: string };
-        await supabase.from("application_documents").insert({
-          application_id: app.id, user_id: user.id, doc_type: u.slot,
-          storage_path: path, file_name: u.file.name, mime_type: u.file.type, size_bytes: u.file.size,
-        });
+          current_stock: data.currentStock,
+          feeding: data.feeding,
+          overwintering: data.overwintering,
+          info_sources: data.infoSources,
+          sachkunde: data.sachkunde,
+          sachkunde_detail: data.sachkunde === "other" ? data.sachkundeDetail : "",
+        },
+        commitments: {
+          no_trade: data.p_noTrade,
+          temporary: data.p_temporary,
+          animal_first: data.p_animalFirst,
+          transparency: data.p_transparency,
+          handover: data.p_handover,
+          truthful: data.p_truthful,
+        },
+        selfPledge: data.selfPledge,
+      }));
+      (Object.entries(docs) as [DocSlot, File | null][]).forEach(([slot, file]) => {
+        if (file) form.set(slot, file, file.name);
+      });
+
+      const res = await fetch(`${EXTERNAL_CONFIG.SUPABASE_URL}/functions/v1/submit-sentinel-application`, {
+        method: "POST",
+        headers: { ...(clerkToken ? { Authorization: `Bearer ${clerkToken}` } : {}) },
+        body: form,
+      });
+      if (!res.ok) {
+        const msg = (await res.json().catch(() => ({})))?.error ?? "Einreichung abgelehnt";
+        throw new Error(msg);
       }
-
-      try {
-        await fetch(`${EXTERNAL_CONFIG.SUPABASE_URL}/functions/v1/send-application-confirmation`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...(clerkToken ? { Authorization: `Bearer ${clerkToken}` } : {}) },
-          body: JSON.stringify({ email: data.email, fullName: data.fullName, caseId: id }),
-        });
-      } catch (e) { console.warn("email function failed", e); }
-
-      setCaseId(id);
+      const submitted = (await res.json()) as { caseId: string };
+      setCaseId(submitted.caseId);
       setDone(true);
       toast({ title: "Bewerbung eingereicht", description: t("onboarding.confirmEmail", { email: data.email }) });
     } catch (e) {
@@ -251,7 +340,7 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
     }
   };
 
-  const progress = useMemo(() => Math.round(((step - 1) / steps.length) * 100), [step]);
+  const progress = useMemo(() => Math.round(((Math.max(step, 1) - 1) / steps.length) * 100), [step]);
 
   if (loading || (variant === "fullscreen" && !user)) {
     return (
@@ -382,6 +471,30 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
               onState={(v) => { setRegState(v); update("region", regDistrict ? `${regDistrict}, ${v}` : v); }}
               onDistrict={(v) => { setRegDistrict(v); update("region", v ? `${v}, ${regState}` : regState); }}
             />
+            <div className="grid grid-cols-[1fr_120px] gap-4">
+              <Field label="Straße" error={errors.street}>
+                <Input value={data.street} onChange={(e) => update("street", e.target.value)} maxLength={160} autoComplete="address-line1" />
+              </Field>
+              <Field label="Hausnummer" error={errors.houseNumber}>
+                <Input value={data.houseNumber} onChange={(e) => update("houseNumber", e.target.value)} maxLength={20} autoComplete="street-address" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="PLZ" error={errors.zip}>
+                <Input value={data.zip} onChange={(e) => update("zip", e.target.value)} maxLength={5} inputMode="numeric" autoComplete="postal-code" />
+              </Field>
+              <Field label="Wohnort" error={errors.city}>
+                <Input value={data.city} onChange={(e) => update("city", e.target.value)} maxLength={120} autoComplete="address-level2" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Telefon (mobil)" error={errors.phone}>
+                <Input type="tel" value={data.phone} onChange={(e) => update("phone", e.target.value)} maxLength={40} autoComplete="tel" />
+              </Field>
+              <Field label="Geburtsdatum" error={errors.birthDate} hint="§11c TSchG: Tierabgabe an unter 16-Jährige nur mit Einwilligung der Erziehungsberechtigten.">
+                <Input type="date" value={data.birthDate} onChange={(e) => update("birthDate", e.target.value)} max={new Date().toISOString().slice(0, 10)} />
+              </Field>
+            </div>
           </div>
         )}
 
@@ -433,9 +546,67 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
 
         {step === 3 && (
           <div className="space-y-6">
-            <StepHeading n={3} label="Haltung" />
+            <StepHeading n={3} label="Haltung & Equipment" />
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Vorgesehenes Terrarium / Freigehege / Aquarium</p>
+              <div className="mt-3 grid grid-cols-2 gap-4">
+                <Field label="Maße" error={errors.enclosureSize}>
+                  <Input value={data.enclosureSize} onChange={(e) => update("enclosureSize", e.target.value)} maxLength={200} placeholder="L × B × H in cm" />
+                </Field>
+                <Field label="Beleuchtung" error={errors.enclosureLighting}>
+                  <Input value={data.enclosureLighting} onChange={(e) => update("enclosureLighting", e.target.value)} maxLength={200} placeholder="UVB, Spot, LED …" />
+                </Field>
+                <Field label="Temperatur & Luftfeuchtigkeit" error={errors.enclosureClimate}>
+                  <Input value={data.enclosureClimate} onChange={(e) => update("enclosureClimate", e.target.value)} maxLength={200} placeholder="z.B. 26–32 °C, 60 %" />
+                </Field>
+                <Field label="Einrichtung" error={errors.enclosureSetup}>
+                  <Input value={data.enclosureSetup} onChange={(e) => update("enclosureSetup", e.target.value)} maxLength={500} placeholder="Verstecke, Klettermöglichkeiten, Wasserschale …" />
+                </Field>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">Fotos deiner Anlage lädst du in Schritt 4 (Dokumente) hoch.</p>
+            </div>
+            <Field label="Vorhandener Tierbesatz" error={errors.currentStock} hint="Arten, Anzahl, Geschlecht — leer lassen, wenn keine">
+              <Textarea rows={2} value={data.currentStock} onChange={(e) => update("currentStock", e.target.value)} maxLength={500} />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Fütterung" error={errors.feeding} hint="Wie, wie oft, womit?">
+                <Textarea rows={2} value={data.feeding} onChange={(e) => update("feeding", e.target.value)} maxLength={500} />
+              </Field>
+              <Field label="Überwinterung" error={errors.overwintering} hint="Falls zutreffend: wie? (optional)">
+                <Textarea rows={2} value={data.overwintering} onChange={(e) => update("overwintering", e.target.value)} maxLength={300} />
+              </Field>
+            </div>
+            <Field label="Wie hast du dich über die Bedürfnisse der Art(en) informiert?" error={errors.infoSources}>
+              <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {INFO_SOURCES.map((src) => {
+                  const active = data.infoSources.includes(src);
+                  return (
+                    <button type="button" key={src}
+                      onClick={() => update("infoSources", active ? data.infoSources.filter((s) => s !== src) : [...data.infoSources, src])}
+                      className={`border px-3 py-2 text-left text-xs transition-colors ${active ? "border-primary bg-primary/10 text-foreground" : "border-border bg-background text-muted-foreground hover:border-primary/50"}`}>
+                      {src}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+            <Field label="Sachkundenachweis" error={errors.sachkunde}>
+              <div className="grid grid-cols-4 gap-2">
+                {SACHKUNDE_OPTIONS.map(([val, lbl]) => (
+                  <button type="button" key={val} onClick={() => update("sachkunde", val)}
+                    className={`border px-3 py-3 text-xs uppercase tracking-wider transition-colors ${data.sachkunde === val ? "border-primary bg-primary/10 text-foreground" : "border-border bg-background text-muted-foreground hover:border-primary/50"}`}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+            </Field>
+            {data.sachkunde === "other" && (
+              <Field label="Welcher Sachkundenachweis?" error={errors.sachkundeDetail}>
+                <Input value={data.sachkundeDetail} onChange={(e) => update("sachkundeDetail", e.target.value)} maxLength={200} />
+              </Field>
+            )}
             <Field label="Warum willst du Sentinel werden?" error={errors.motivation}>
-              <Textarea rows={8} value={data.motivation} onChange={(e) => update("motivation", e.target.value)} maxLength={2000} />
+              <Textarea rows={6} value={data.motivation} onChange={(e) => update("motivation", e.target.value)} maxLength={2000} />
               <p className="mt-1 text-right font-mono text-[10px] text-muted-foreground">{data.motivation.length} / 2000</p>
             </Field>
           </div>
@@ -475,7 +646,12 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
         {step === 6 && (
           <div className="space-y-8">
             <StepHeading n={6} label="Prüfen & Einreichen" />
-            <ReviewBlock title="Identität" onEdit={() => setStep(1)} rows={[["Name", data.fullName], ["E-Mail", data.email], ["Region", data.region]]} />
+            <ReviewBlock title="Identität" onEdit={() => setStep(1)} rows={[
+              ["Name", data.fullName], ["E-Mail", data.email], ["Region", data.region],
+              ["Anschrift", `${data.street} ${data.houseNumber}, ${data.zip} ${data.city}`],
+              ["Telefon", data.phone],
+              ["Geburtsdatum", data.birthDate],
+            ]} />
             <ReviewBlock title="Erfahrung & Kapazität" onEdit={() => setStep(2)} rows={[
               ["Jahre", data.yearsKeeping],
               ["Spezies", data.species],
@@ -484,7 +660,18 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
               ["Quarantäne", data.quarantine || "—"],
               ["Tierarzt", data.vetContact],
             ]} />
-            <ReviewBlock title="Motivation" onEdit={() => setStep(3)} rows={[["Text", data.motivation]]} />
+            <ReviewBlock title="Haltung & Equipment" onEdit={() => setStep(3)} rows={[
+              ["Maße", data.enclosureSize],
+              ["Beleuchtung", data.enclosureLighting],
+              ["Temperatur/rF", data.enclosureClimate],
+              ["Einrichtung", data.enclosureSetup],
+              ["Tierbesatz", data.currentStock || "keiner"],
+              ["Fütterung", data.feeding],
+              ["Überwinterung", data.overwintering || "—"],
+              ["Infoquellen", data.infoSources.join(", ")],
+              ["Sachkunde", (SACHKUNDE_OPTIONS.find(([v]) => v === data.sachkunde)?.[1] ?? "—") + (data.sachkunde === "other" ? `: ${data.sachkundeDetail}` : "")],
+              ["Motivation", data.motivation],
+            ]} />
             <ReviewBlock title="KYC" onEdit={() => setStep(4)} rows={[["Ausweis vorne", docs.id_front?.name ?? "—"], ["Ausweis hinten", docs.id_back?.name ?? "—"], ["Gesichtsbild", docs.selfie?.name ?? "—"], ["Anlage", docs.facility?.name ?? "—"]]} />
             <ReviewBlock title="Pledge" onEdit={() => setStep(5)} rows={PLEDGES.map((p) => [p.text, data[p.key] ? "✓" : "—"])} />
             <div className="border border-primary/40 bg-primary/[0.04] p-5">
@@ -512,8 +699,8 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
             Weiter <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
         ) : (
-          <Button type="button" onClick={onSubmit} disabled={!data.selfPledge || submitting || !user.emailVerified}>
-            {submitting ? t("onboarding.submitting") : !user.emailVerified ? t("onboarding.verify.cta") : "Bewerbung einreichen"}
+          <Button type="button" onClick={onSubmit} disabled={!data.selfPledge || submitting}>
+            {submitting ? t("onboarding.submitting") : !user.emailVerified ? "E-Mail zuerst verifizieren (Schritt 1)" : "Bewerbung einreichen"}
           </Button>
         )}
       </div>

@@ -331,7 +331,7 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
             <button
               key={t.key}
               onClick={() => setActive(t.key)}
-              className={`flex items-center gap-2 bg-surface px-4 py-3 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
+              className={`flex flex-1 items-center justify-center gap-2 bg-surface px-4 py-3 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
                 active === t.key ? "text-primary" : "text-muted-foreground hover:text-foreground"
               }`}
             >

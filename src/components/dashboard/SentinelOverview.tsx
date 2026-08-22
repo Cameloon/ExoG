@@ -125,11 +125,15 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
   }, [duties, filterCaseId, filterCategory, filterPriority, sortBy]);
 
   const open = filteredAndSortedOpen;
-  const overdue = open.filter((d) => d.due.startsWith("Gestern"));
-  const today = open.filter((d) => d.due.startsWith("Heute"));
-  const upcoming = open.filter(
-    (d) => !d.due.startsWith("Heute") && !d.due.startsWith("Gestern"),
+  // ponytail: compare dueIso against now instead of the "Gestern" label —
+  // a duty due 3 days ago formats as "dd.mm · time" and landed in "upcoming".
+  const nowMs = Date.now();
+  const todayStr = new Date().toDateString();
+  const overdue = open.filter((d) => d.dueIso && new Date(d.dueIso).getTime() < nowMs);
+  const today = open.filter(
+    (d) => d.dueIso && new Date(d.dueIso).toDateString() === todayStr && !overdue.includes(d),
   );
+  const upcoming = open.filter((d) => !overdue.includes(d) && !today.includes(d));
 
   const enclosureBreakdown = useMemo(() => {
     const map = new Map<string, { total: number; belegt: number }>();
@@ -187,7 +191,7 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
   return (
     <div className="grid gap-8 lg:grid-cols-12">
       {/* Linke Spalte: Profil + Zertifikate */}
-      <section className="lg:col-span-4 space-y-px bg-border">
+      <section className="lg:col-span-4 flex flex-col space-y-px bg-border">
         <div className="bg-surface p-6">
           <span className="eyebrow">Profil</span>
           <div className="mt-4 flex items-start gap-4">
@@ -275,6 +279,7 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
             </div>
           </div>
         )}
+        <div className="flex-1 bg-background" aria-hidden="true" />
       </section>
 
       {/* Mittlere + rechte Spalte */}

@@ -44,13 +44,14 @@ const toDuty = (r: DutyRow): Duty => ({
   category: r.category as Duty["category"],
 });
 
-export async function fetchDuties(client: Client, userId: string): Promise<Duty[]> {
+export async function fetchDuties(client: Client, userId: string, page = 0, pageSize = 200): Promise<Duty[]> {
+  const from = page * pageSize;
   const { data, error } = await client
     .from("duties")
     .select("id, case_code, title, category, priority, due_at, done")
     .eq("owner_id", userId)
     .order("created_at", { ascending: false })
-    .limit(200);
+    .range(from, from + pageSize - 1);
   if (error) throw error;
   return ((data ?? []) as DutyRow[]).map(toDuty);
 }
@@ -65,6 +66,7 @@ export type NewDuty = {
 };
 
 export async function addDuty(client: Client, input: NewDuty): Promise<Duty> {
+  const due = input.dueIso ? new Date(input.dueIso) : null;
   const { data, error } = await client
     .from("duties")
     .insert({
@@ -73,7 +75,8 @@ export async function addDuty(client: Client, input: NewDuty): Promise<Duty> {
       case_code: input.caseCode,
       category: input.category,
       priority: input.priority,
-      due_at: input.dueIso ? new Date(input.dueIso).toISOString() : null,
+      // ponytail: guard malformed datetime-local strings instead of throwing a RangeError
+      due_at: due && !Number.isNaN(due.getTime()) ? due.toISOString() : null,
     })
     .select("id, case_code, title, category, priority, due_at, done")
     .single();
@@ -104,10 +107,14 @@ export async function fetchActivity7d(client: Client, userId: string): Promise<{
     .eq("author_id", userId)
     .gte("created_at", since.toISOString());
   if (error) return days;
+  // ponytail: bucket by local calendar day (toDateString) instead of 86400000
+  // arithmetic — DST days are 23/25h and would mis-bucket UTC-evening logs.
+  const localDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const todayKey = localDay(now);
   for (const row of data ?? []) {
     const d = new Date((row as { created_at: string }).created_at);
-    const idx = 6 - Math.floor((now.setHours(0,0,0,0) - new Date(d).setHours(0,0,0,0)) / 86400000);
-    if (idx >= 0 && idx < 7) days[idx].logs += 1;
+    const daysAgo = Math.round((todayKey - localDay(d)) / 86400000);
+    if (daysAgo >= 0 && daysAgo < 7) days[daysAgo].logs += 1;
   }
   return days;
 }

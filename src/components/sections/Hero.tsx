@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import heroImg from "@/assets/hero-evidence.jpg";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
@@ -8,11 +8,25 @@ import { Link } from "react-router-dom";
 const PixelBlast = lazy(() => import("@/components/backgrounds/PixelBlast"));
 
 export const Hero = () => {
+  // Defer mounting the shader until the browser is idle, so the 135 kB gz
+  // three.js chunk does not compete with first paint on every landing visit.
+  const [showFx, setShowFx] = useState(false);
+  useEffect(() => {
+    const mount = () => setShowFx(true);
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(mount, { timeout: 1500 });
+      return () => cancelIdleCallback(id);
+    }
+    const t = setTimeout(mount, 1200);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
     <section className="relative overflow-hidden hero-bg">
       <div className="absolute inset-0 z-0">
-        <Suspense fallback={null}>
-        <PixelBlast
+        {showFx && (
+          <Suspense fallback={null}>
+          <PixelBlast
           color="#f2a92c"
           variant="circle"
           pixelSize={3}
@@ -25,7 +39,8 @@ export const Hero = () => {
           liquid={false}
           transparent={true}
         />
-        </Suspense>
+          </Suspense>
+        )}
       </div>
 
       <div className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-b from-[#09090B]/70 via-transparent to-[#09090B]" />

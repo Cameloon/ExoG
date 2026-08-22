@@ -33,3 +33,12 @@ export async function sniffImage(file: File): Promise<SniffedImage | null> {
   const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
   return sniff(head);
 }
+
+/** Image or PDF verification for document uploads (e.g. lab reports). */
+export async function sniffDocument(file: File): Promise<SniffedImage | null> {
+  if (file.size === 0 || file.size > MAX_BYTES) return null;
+  const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  if (head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46)
+    return { ext: "pdf", mime: "application/pdf" };
+  return sniff(head);
+}

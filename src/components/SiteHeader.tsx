@@ -26,7 +26,11 @@ export const SiteHeader = () => {
   ];
 
   const appNav = [
-    ...(isBehoerde ? [{ href: "/behoerde", label: "Dashboard", type: "route" as const }] : []),
+    ...(isBehoerde ? [
+      { href: "/behoerde", label: "Dashboard", type: "route" as const },
+      { href: "/behoerde/network", label: "Network", type: "route" as const },
+      { href: "/behoerde/verwaltung", label: "Verwaltung", type: "route" as const },
+    ] : []),
     ...(isEinrichtung ? [
       { href: "/shelters", label: "Einrichtung", type: "route" as const },
       { href: "/care", label: "Pflege", type: "route" as const },

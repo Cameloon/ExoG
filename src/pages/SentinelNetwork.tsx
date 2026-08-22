@@ -7,6 +7,7 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { useToast } from "@/hooks/use-toast";
 import { Building2, MapPin, Clock, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoadingSnake } from "@/components/ui/loading-snake";
 import { fetchShelters, fetchMyRequests, sendShelterRequest } from "@/lib/shelters";
 import type { Shelter, ShelterRequest } from "@/lib/types";
 
@@ -62,7 +63,9 @@ const SentinelNetwork = () => {
     return (
       <div className="min-h-screen bg-background text-muted-foreground">
         <SiteHeader />
-        <main className="container py-24 text-center">…</main>
+        <main className="container py-24 text-center">
+          <LoadingSnake label="Lade Sentinel-Netzwerk" />
+        </main>
       </div>
     );
   }
@@ -98,7 +101,9 @@ const SentinelNetwork = () => {
         </p>
 
         {busy ? (
-          <p className="mt-10 font-mono text-xs uppercase tracking-[0.22em] text-muted-foreground">Lade …</p>
+          <div className="mt-10 flex justify-center">
+            <LoadingSnake label="Lade …" compact />
+          </div>
         ) : (
           <div className="mt-10 grid gap-10">
             <section>

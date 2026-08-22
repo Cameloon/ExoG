@@ -14,6 +14,9 @@
 const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "http://localhost:5173";
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY") ?? "";
 const EMAIL_FROM = Deno.env.get("EMAIL_FROM") ?? "BioSteward <noreply@example.com>";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const CLERK_SECRET = Deno.env.get("CLERK_SECRET_KEY") ?? "";
 
 // "Name <addr@host>" → { name, email }; bare address → default name.
 const fromMatch = EMAIL_FROM.match(/^(.*?)\s*<([^>]+)>$/);
@@ -29,9 +32,8 @@ const corsHeaders = {
 };
 
 interface Payload {
-  email: string;
-  fullName: string;
-  caseId: string;
+  applicationId?: string;
+  caseId?: string;
 }
 
 function redactEmail(email: string): string {
@@ -51,6 +53,46 @@ function rateLimited(userId: string): boolean {
   hits.push(now);
   rateBuckets.set(userId, hits);
   return hits.length > RATE_MAX;
+}
+
+// Recipient is the caller's verified Clerk email, not the client-supplied
+// address stored on the application (which a caller could set to a third
+// party's address to spam them). Falls back to the stored email only when no
+// CLERK_SECRET_KEY is configured.
+async function clerkPrimaryEmail(userId: string): Promise<string | null> {
+  if (!CLERK_SECRET) return null;
+  const res = await fetch(`https://api.clerk.com/v1/users/${userId}`, {
+    headers: { Authorization: `Bearer ${CLERK_SECRET}` },
+  });
+  if (!res.ok) return null;
+  const u = (await res.json()) as {
+    primary_email_address_id?: string | null;
+    email_addresses?: { id: string; email_address: string }[];
+  };
+  const primary = u.email_addresses?.find((e) => e.id === u.primary_email_address_id);
+  return primary?.email_address ?? u.email_addresses?.[0]?.email_address ?? null;
+}
+
+async function loadOwnApplication(userId: string, body: Payload): Promise<{ email: string; full_name: string; case_id: string } | null> {
+  if (!SUPABASE_URL || !SERVICE_ROLE) return null;
+  const filters = body.applicationId
+    ? `id=eq.${encodeURIComponent(body.applicationId)}`
+    : body.caseId
+      ? `case_id=eq.${encodeURIComponent(body.caseId)}`
+      : "";
+  if (!filters) return null;
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/sentinel_applications?${filters}&user_id=eq.${encodeURIComponent(userId)}&select=email,full_name,case_id&limit=1`,
+    {
+      headers: {
+        Authorization: `Bearer ${SERVICE_ROLE}`,
+        apikey: SERVICE_ROLE,
+      },
+    },
+  );
+  if (!res.ok) return null;
+  const rows = (await res.json()) as { email: string; full_name: string; case_id: string }[];
+  return rows[0] ?? null;
 }
 
 const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "ideal-tetra-26.clerk.accounts.dev";
@@ -144,7 +186,8 @@ Deno.serve(async (req) => {
 
   try {
     const body = (await req.json()) as Payload;
-    if (!body?.email || !body?.caseId) {
+    const app = await loadOwnApplication(userId, body);
+    if (!app) {
       return new Response(JSON.stringify({ error: "missing fields" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -152,8 +195,9 @@ Deno.serve(async (req) => {
     }
 
     // German-only app — no language branch.
-    const subject = `Bewerbung eingegangen · ${body.caseId}`;
-    const text = `Hallo ${body.fullName},\n\nDeine Sentinel-Bewerbung (${body.caseId}) ist eingegangen. Wir melden uns innerhalb von 5 Werktagen.\n\n— BioSteward Custody Network`;
+    const subject = `Bewerbung eingegangen · ${app.case_id}`;
+    const text = `Hallo ${app.full_name},\n\nDeine Sentinel-Bewerbung (${app.case_id}) ist eingegangen. Wir melden uns innerhalb von 5 Werktagen.\n\n— BioSteward Custody Network`;
+    const recipient = (await clerkPrimaryEmail(userId)) ?? app.email;
 
     if (BREVO_API_KEY) {
       const res = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -164,7 +208,7 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           sender: SENDER,
-          to: [{ email: body.email, name: body.fullName }],
+          to: [{ email: recipient, name: app.full_name }],
           subject,
           textContent: text,
         }),
@@ -179,7 +223,7 @@ Deno.serve(async (req) => {
     } else {
       // Dev fallback: no provider configured — log so the client flow is testable.
       // Avoid logging PII: only a redacted marker + case id.
-      console.log("[email] no BREVO_API_KEY, logged only", { to: redactEmail(body.email), caseId: body.caseId });
+      console.log("[email] no BREVO_API_KEY, logged only", { to: redactEmail(recipient), caseId: app.case_id });
     }
 
     return new Response(

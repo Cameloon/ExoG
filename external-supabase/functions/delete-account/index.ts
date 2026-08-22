@@ -129,20 +129,47 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "storage purge failed, account NOT deleted" }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  // 2) Delete own DB rows (FKs cascade where defined).
-  await del(`/rest/v1/application_documents?user_id=eq.${userId}`);
-  await del(`/rest/v1/sentinel_applications?user_id=eq.${userId}`);
-  await del(`/rest/v1/pending_shelter_requests?user_id=eq.${userId}`);
-  await del(`/rest/v1/sentinel_shelter_requests?user_id=eq.${userId}`);
-  await del(`/rest/v1/user_roles?user_id=eq.${userId}`);
-  await del(`/rest/v1/profiles?id=eq.${userId}`);
+  // 2) Delete own DB rows (FKs cascade where defined). Any failure aborts:
+  //    the Clerk user must not be deleted while orphaned rows survive.
+  const rowDeletes: [string, string][] = [
+    ["application_documents", `user_id=eq.${userId}`],
+    ["sentinel_applications", `user_id=eq.${userId}`],
+    ["pending_shelter_requests", `user_id=eq.${userId}`],
+    ["sentinel_shelter_requests", `user_id=eq.${userId}`],
+    ["user_roles", `user_id=eq.${userId}`],
+    ["profiles", `id=eq.${userId}`],
+  ];
+  for (const [table, filter] of rowDeletes) {
+    const res = await del(`/rest/v1/${table}?${filter}`);
+    if (!res.ok) {
+      console.error(`delete ${table} failed: ${res.status}`);
+      return new Response(JSON.stringify({ error: `db cleanup failed (${table}), account NOT deleted` }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+  }
+
+  // 2b) Anonymize the human-readable name on rows that must survive as
+  //     evidence. The author id column is NOT NULL and stays — it is no
+  //     longer linkable to a person once the Clerk user is deleted.
+  const anon = await fetch(`${SUPABASE_URL}/rest/v1/care_logs?author_id=eq.${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: { ...serviceHeaders, Prefer: "return=minimal" },
+    body: JSON.stringify({ author_name: "Gelöschtes Konto" }),
+  });
+  if (!anon.ok) {
+    console.error("anonymize care_logs failed:", anon.status);
+    return new Response(JSON.stringify({ error: "db cleanup failed (care_logs), account NOT deleted" }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
 
   // 3) Delete Clerk user (cascade revokes sessions).
   if (CLERK_SECRET) {
-    await fetch(`https://api.clerk.com/v1/users/${userId}`, {
+    const res = await fetch(`https://api.clerk.com/v1/users/${userId}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${CLERK_SECRET}`, "Content-Type": "application/json" },
     });
+    if (!res.ok) {
+      console.error("clerk delete failed:", res.status);
+      return new Response(JSON.stringify({ error: "clerk delete failed, account NOT deleted" }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
   }
 
   return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });

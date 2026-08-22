@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -19,13 +19,12 @@ import {
 } from "lucide-react";
 import { CASES, CARE_LOGS, ME_SENTINEL, DUTIES, ACTIVITY_7D, type CareLog, type Duty, type DutyPriority, type SentinelProfile } from "@/lib/dashboard-data";
 import { RATIONALE_RULES, validateRationale, sign } from "@/lib/care-log-validation";
-import { exportCareLogsZip } from "@/lib/care-log-export";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import {
   addCareLog,
-  fetchCareLogs,
+  fetchAllCareLogs,
   fetchLiveSentinelProfile,
   fetchMyWards,
   wardToCase,
@@ -34,6 +33,8 @@ import {
 import { addDuty as persistDuty, fetchActivity7d, fetchDuties, formatDue, setDutyDone } from "@/lib/duties";
 import { DocumentsHub } from "./DocumentsHub";
 import { SentinelOverview } from "./SentinelOverview";
+import { IdentificationQueue } from "./IdentificationQueue";
+import { LoadingSnake } from "@/components/ui/loading-snake";
 
 type SectionTab = "log" | "docs";
 type TopTab = "overview" | "care";
@@ -49,7 +50,7 @@ const BEHAVIORS: NonNullable<CareLog["metrics"]>["behavior"][] = [
 
 
 export const SentinelView = ({ live = false }: { live?: boolean }) => {
-  const { user } = useAuth();
+  const { user, isExpert } = useAuth();
   const supabase = useExternalSupabase();
 
   // ── Live data (only fetched when live=true; demo uses hardcoded data) ──
@@ -77,17 +78,26 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
   const duties = live ? liveDuties : demoDuties;
   const activity = live ? liveActivity : ACTIVITY_7D;
 
+  // Per-toggle pre-toggle value, so a failed toggle rolls back to the state
+  // before THAT toggle — not to whatever the user toggled afterwards.
+  const dutyPrevRef = useRef<Record<string, boolean>>({});
+
   const handleToggleDuty = (id: string, done: boolean) => {
     if (!live) {
       setDemoDuties((prev) => prev.map((d) => (d.id === id ? { ...d, done } : d)));
       return;
     }
+    dutyPrevRef.current[id] ??= !done;
     setLiveDuties((prev) => prev.map((d) => (d.id === id ? { ...d, done } : d)));
-    setDutyDone(supabase, id, done).catch((e) => {
-      // rollback on failure — otherwise the UI lies until reload
-      setLiveDuties((prev) => prev.map((d) => (d.id === id ? { ...d, done: !done } : d)));
-      toast({ title: "Pflicht nicht gespeichert", description: (e as Error).message, variant: "destructive" });
-    });
+    setDutyDone(supabase, id, done)
+      .then(() => delete dutyPrevRef.current[id])
+      .catch((e) => {
+        // rollback on failure — otherwise the UI lies until reload
+        const before = dutyPrevRef.current[id] ?? !done;
+        delete dutyPrevRef.current[id];
+        setLiveDuties((prev) => prev.map((d) => (d.id === id ? { ...d, done: before } : d)));
+        toast({ title: "Pflicht nicht gespeichert", description: (e as Error).message, variant: "destructive" });
+      });
   };
 
   const handleAddDuty = (input: { title: string; caseId?: string; dueIso: string; priority: DutyPriority; category: Duty["category"] }) => {
@@ -192,7 +202,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
     if (!live || !activeWard || liveLogs[activeId]) return;
     void (async () => {
       try {
-        const l = await fetchCareLogs(supabase, activeWard.id);
+        const l = await fetchAllCareLogs(supabase, activeWard.id);
         setLiveLogs((p) => ({ ...p, [activeId]: l }));
       } catch (e) {
         toast({ title: "Log-Verlauf nicht ladbar", description: (e as Error).message, variant: "destructive" });
@@ -214,16 +224,24 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
   const addLog = async () => {
     if (!activeId) return;
     if (!note.trim()) return setError("Beobachtung darf nicht leer sein.");
-    const v = validateRationale(type, rationale);
-    if (!v.ok) return setError(`Begründung unzureichend für „${type}": ${v.reason}`);
+
+    const num = (s: string, min: number, max: number): number | undefined => {
+      const n = Number(s);
+      return Number.isFinite(n) && n >= min && n <= max ? n : undefined;
+    };
+    if (tempC && num(tempC, -50, 60) === undefined) return setError("Temperatur muss zwischen -50 °C und 60 °C liegen.");
+    if (humidity && num(humidity, 0, 100) === undefined) return setError("Luftfeuchte muss zwischen 0 % und 100 % liegen.");
 
     const metrics: CareLog["metrics"] = {
-      tempC: tempC ? Number(tempC) : undefined,
-      humidity: humidity ? Number(humidity) : undefined,
+      tempC: tempC ? num(tempC, -50, 60) : undefined,
+      humidity: humidity ? num(humidity, 0, 100) : undefined,
       feedItem: feedItem.trim() || undefined,
-      feedAmountG: feedAmountG ? Number(feedAmountG) : undefined,
+      feedAmountG: feedAmountG ? num(feedAmountG, 0, 100000) : undefined,
       behavior: behavior || undefined,
     };
+
+    const v = validateRationale(type, rationale, metrics);
+    if (!v.ok) return setError(`Begründung unzureichend für „${type}": ${v.reason}`);
 
     // Live: persist hash-chained to care_logs and prepend the stored entry.
     if (live) {
@@ -232,7 +250,6 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
       try {
         const entry = await addCareLog(supabase, {
           wardId: activeWard.id,
-          authorId: user.id,
           authorName: sentinel.name,
           type,
           note: note.trim(),
@@ -269,13 +286,14 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
     if (!active) return;
     try {
       setExporting(true);
+      const { exportCareLogsZip } = await import("@/lib/care-log-export");
       await exportCareLogsZip({
         caseRecord: active,
         logs: activeLogs,
         sentinel,
       });
       const nonCompliant = activeLogs.filter(
-        (l) => !validateRationale(l.type, l.rationale ?? "").ok,
+        (l) => !validateRationale(l.type, l.rationale ?? "", l.metrics).ok,
       ).length;
       toast({
         title: "Export erstellt",
@@ -293,14 +311,19 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
   };
 
   const rule = RATIONALE_RULES[type];
-  const validation = validateRationale(type, rationale);
+  // ponytail: memoize — the keyword scan runs on every keystroke otherwise
+  const validation = useMemo(() => validateRationale(type, rationale, undefined), [type, rationale]);
 
 
   const capPct = sentinel.capacity.total > 0 ? (sentinel.capacity.used / sentinel.capacity.total) * 100 : 0;
 
   // ponytail: block render until live data arrives to avoid demo-flash
   if (live && booting) {
-    return <p className="font-mono text-xs uppercase tracking-[0.22em] text-muted-foreground">Lade Sentinel-Profil …</p>;
+    return (
+      <div className="flex justify-center py-10">
+        <LoadingSnake label="Lade Sentinel-Profil" compact />
+      </div>
+    );
   }
 
   return (
@@ -398,13 +421,21 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
       )}
 
       {topTab === "care" && (
-      <div className="mt-6 grid gap-8 lg:grid-cols-12">
+      <div className="mt-6">
+        {live && isExpert && (
+          <div className="mb-8">
+            <IdentificationQueue />
+          </div>
+        )}
+      <div className="grid gap-8 lg:grid-cols-12">
         {/* My animals */}
         <section className="lg:col-span-5">
           <h2 className="text-xl tracking-tight">Meine Pflegestellen</h2>
           <div className="mt-4 space-y-px bg-border">
             {live && booting && (
-              <div className="bg-surface p-4 font-mono text-xs text-muted-foreground">Lade Wards …</div>
+              <div className="bg-surface p-4">
+                <LoadingSnake label="Lade Wards" compact />
+              </div>
             )}
             {live && !booting && myCases.length === 0 && (
               <div className="bg-surface p-4 font-mono text-xs text-muted-foreground">
@@ -479,7 +510,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
                   <button
                     key={t.k}
                     onClick={() => setSection(t.k)}
-                    className={`bg-surface px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
+                    className={`flex-1 bg-surface px-4 py-2.5 text-center font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
                       section === t.k
                         ? "text-primary"
                         : "text-muted-foreground hover:text-foreground"
@@ -504,7 +535,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
                       <button
                         key={t}
                         onClick={() => setType(t)}
-                        className={`flex items-center gap-2 bg-surface px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
+                        className={`flex flex-1 items-center justify-center gap-2 bg-surface px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
                           type === t ? "text-primary" : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
@@ -578,7 +609,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
                         key={b}
                         type="button"
                         onClick={() => setBehavior(behavior === b ? "" : b)}
-                        className={`bg-surface px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
+                        className={`flex-1 bg-surface px-3 py-2 text-center font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
                           behavior === b
                             ? "text-primary"
                             : "text-muted-foreground hover:text-foreground"
@@ -734,6 +765,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
             </div>
           )}
         </section>
+      </div>
       </div>
       )}
     </>

@@ -64,11 +64,37 @@ export type ValidationResult = {
   length: number;
 };
 
-export function validateRationale(type: CareLog["type"], text: string): ValidationResult {
+/** Typabhängige Messwert-Pflichten (audit-relevant: ein "KONFORM" ohne Messwerte wäre wertlos). */
+function metricIssue(type: CareLog["type"], metrics?: CareLog["metrics"]): string | null {
+  if (type === "Klima") {
+    if (!metrics || (metrics.tempC === undefined && metrics.humidity === undefined)) {
+      return "Messwerte fehlen (Temperatur oder Luftfeuchte).";
+    }
+  }
+  if (type === "Fütterung" && !metrics?.feedItem) {
+    return "Futterart fehlt (Futter/Annahme dokumentieren).";
+  }
+  return null;
+}
+
+export function validateRationale(type: CareLog["type"], text: string, metrics?: CareLog["metrics"]): ValidationResult {
   const rule = RATIONALE_RULES[type];
   const trimmed = (text ?? "").trim();
   const t = trimmed.toLowerCase();
   const length = trimmed.length;
+
+  // ponytail: rows with an unknown type (legacy/hand-edited) must fail closed
+  // instead of throwing, so exports never crash on a single bad row.
+  if (!rule) {
+    return {
+      ok: false,
+      missing: [],
+      covered: [],
+      reason: `Unbekannter Eintragstyp: ${type}`,
+      minLen: 0,
+      length,
+    };
+  }
 
   if (length < rule.minLen) {
     return {
@@ -86,6 +112,8 @@ export function validateRationale(type: CareLog["type"], text: string): Validati
     if (g.any.some((kw) => t.includes(kw))) covered.push(g.label);
     else missing.push(g.label);
   }
+  const metr = metricIssue(type, metrics);
+  if (metr) missing.push(metr);
   return {
     ok: missing.length === 0,
     missing,

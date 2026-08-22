@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { EXTERNAL_CONFIG } from "@/config/external";
+import { SentinelChangePanel } from "@/components/dashboard/SentinelChangePanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -104,6 +105,12 @@ const Account = () => {
             </Button>
           </div>
         </div>
+
+        {role === "sentinel" && (
+          <div className="mt-10">
+            <SentinelChangePanel />
+          </div>
+        )}
 
         <div className="mt-10 border border-border rounded-md p-6">
           <h2 className="font-mono text-xs uppercase tracking-[0.18em] text-destructive">

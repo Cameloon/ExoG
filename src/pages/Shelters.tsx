@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { useAuth } from "@/hooks/useAuth";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { LoadingSnake } from "@/components/ui/loading-snake";
 import { useToast } from "@/hooks/use-toast";
 import { PawPrint, Network, Building2, Check, X, ChevronDown } from "lucide-react";
 import { WardManager } from "@/components/wards/WardManager";
@@ -20,8 +21,10 @@ import {
   setRequestStatus,
 } from "@/lib/shelters";
 import { parseCapacity, totalCapacity } from "@/lib/habitats";
-import type { Shelter, Ward, ShelterRequest } from "@/lib/types";
+import type { Shelter, Ward, ShelterRequest, WardInterest } from "@/lib/types";
 import { BUNDESLAENDER } from "@/lib/germanRegions";
+import { fetchWardInterests, setInterestStatus } from "@/lib/shelters";
+import { QuestionnaireBlock } from "@/components/QuestionnaireBlock";
 
 type Tab = "profil" | "tiere" | "netzwerk";
 
@@ -35,16 +38,26 @@ type ApplicantApp = {
   motivation: string;
   status: string;
   created_at: string;
+  pledge_data: { questionnaire?: unknown } | null;
+};
+
+const INTEREST_STATUS: Record<string, { lbl: string; cls: string }> = {
+  open: { lbl: "offen", cls: "text-primary" },
+  shortlisted: { lbl: "in Auswahl", cls: "text-amber-400" },
+  matched: { lbl: "gematcht", cls: "text-green-400" },
+  declined: { lbl: "abgelehnt", cls: "text-muted-foreground" },
+  withdrawn: { lbl: "zurückgezogen", cls: "text-muted-foreground" },
 };
 
 const Shelters = () => {
-  const { user, isEinrichtung, loading } = useAuth();
+  const { user, isEinrichtung, role, loading } = useAuth();
   const supabase = useExternalSupabase();
   const { toast } = useToast();
   const [tab, setTab] = useState<Tab>("profil");
   const [shelter, setShelter] = useState<Shelter | null>(null);
   const [wards, setWards] = useState<Ward[]>([]);
   const [requests, setRequests] = useState<ShelterRequest[]>([]);
+  const [interests, setInterests] = useState<WardInterest[]>([]);
   const [applicants, setApplicants] = useState<Record<string, ApplicantApp>>({});
   const [expandedReq, setExpandedReq] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
@@ -81,18 +94,24 @@ const Shelters = () => {
       const s = await fetchMyShelter(supabase, user.id);
       setShelter(s);
       if (s) {
-        const [w, r] = await Promise.all([
+        const [w, r, i] = await Promise.all([
           fetchShelterWards(supabase, s.id),
           fetchRequestsForShelter(supabase, s.id),
+          fetchWardInterests(supabase, s.id),
         ]);
         setWards(w);
         setRequests(r);
-        // Klarname + Profil der Bewerber (RLS 00017: shelter reads its applicants)
-        const ids = [...new Set(r.map((x) => x.sentinel_id))];
+        setInterests(i);
+        // Klarname + Profil der Bewerber (RLS 00017 + 00024: shelter reads
+        // applicants of its requests and ward applications)
+        const ids = [...new Set([
+          ...r.map((x) => x.sentinel_id),
+          ...i.map((x) => x.applicant_id),
+        ])];
         if (ids.length > 0) {
           const { data } = await supabase
             .from("sentinel_applications")
-            .select("user_id, full_name, email, region, experience_years, species_focus, capacity, motivation, status, created_at")
+            .select("user_id, full_name, email, region, experience_years, species_focus, capacity, motivation, status, created_at, pledge_data")
             .in("user_id", ids)
             .order("created_at", { ascending: false });
           const map: Record<string, ApplicantApp> = {};
@@ -138,9 +157,17 @@ const Shelters = () => {
     return (
       <div className="min-h-screen bg-background text-muted-foreground">
         <SiteHeader />
-        <main className="container py-24 text-center">…</main>
+        <main className="container py-24 text-center">
+          <LoadingSnake label="Lade Einrichtungen" />
+        </main>
       </div>
     );
+  }
+
+  // Role holders (sentinel/gov/admin) have no shelter business — bounce them
+  // off the registration page; only role-less users may register as Einrichtung.
+  if (!isEinrichtung && role !== "user") {
+    return <Navigate to="/dashboard" replace />;
   }
 
   if (!isEinrichtung) {
@@ -220,6 +247,16 @@ const Shelters = () => {
     }
   };
 
+  const respondInterest = async (id: string, status: "matched" | "declined") => {
+    try {
+      await setInterestStatus(supabase, id, status);
+      setInterests((r) => r.map((x) => (x.id === id ? { ...x, status } : x)));
+      toast({ title: status === "matched" ? "Interesse bestätigt" : "Interesse abgelehnt" });
+    } catch (e) {
+      toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <SiteHeader />
@@ -250,7 +287,9 @@ const Shelters = () => {
         </div>
 
         {busy && !shelter ? (
-          <p className="mt-10 font-mono text-xs uppercase tracking-[0.22em] text-muted-foreground">Lade …</p>
+          <div className="mt-10 flex justify-center">
+            <LoadingSnake label="Lade Einrichtungen" compact />
+          </div>
         ) : (
           <div className="mt-10">
             {tab === "profil" && (
@@ -272,6 +311,64 @@ const Shelters = () => {
             {tab === "netzwerk" && (
               <section>
                 <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                  Ward-Anfragen ({interests.filter((x) => x.status === "open" || x.status === "shortlisted").length} offen)
+                </p>
+                {interests.length === 0 ? (
+                  <p className="mt-4 text-sm text-muted-foreground">
+                    Noch keine Interessensbekundungen für deine Tiere.
+                  </p>
+                ) : (
+                  <ul className="mt-4 divide-y divide-border border border-border bg-surface">
+                    {interests.map((x) => {
+                      const app = applicants[x.applicant_id];
+                      const st = INTEREST_STATUS[x.status] ?? { lbl: x.status, cls: "text-muted-foreground" };
+                      const expanded = expandedReq === `ward-${x.id}`;
+                      return (
+                        <li key={x.id} className="px-5 py-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">
+                                {x.ward ? `${x.ward.common_name} (${x.ward.case_code})` : "Ward"}
+                                <span className={`ml-2 font-mono text-[10px] uppercase tracking-[0.2em] ${st.cls}`}>{st.lbl}</span>
+                              </p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                {app ? (
+                                  <button
+                                    onClick={() => setExpandedReq(expanded ? null : `ward-${x.id}`)}
+                                    className="inline-flex items-center gap-1 text-foreground hover:text-primary"
+                                  >
+                                    {app.full_name} · {app.region} · {app.experience_years} Jahre Erfahrung
+                                    <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                                  </button>
+                                ) : "Bewerber:in"}{" "}
+                                · {new Date(x.created_at).toLocaleDateString("de-DE")}
+                              </p>
+                              <div className="mt-1 flex flex-wrap gap-2">
+                                {x.consultation_requested && (
+                                  <span className="inline-block border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-primary">
+                                    Beratungsgespräch gewünscht
+                                  </span>
+                                )}
+                                {x.message && <p className="w-full text-xs text-muted-foreground">{x.message}</p>}
+                              </div>
+                            </div>
+                            {(x.status === "open" || x.status === "shortlisted") && (
+                              <div className="flex gap-2">
+                                <Button size="sm" variant="outline" onClick={() => respondInterest(x.id, "matched")}><Check className="mr-1 h-3 w-3" /> Matchen</Button>
+                                <Button size="sm" variant="ghost" onClick={() => respondInterest(x.id, "declined")}><X className="mr-1 h-3 w-3" /> Ablehnen</Button>
+                              </div>
+                            )}
+                          </div>
+                          {expanded && app && app.pledge_data?.questionnaire && (
+                            <QuestionnaireBlock raw={app.pledge_data.questionnaire} className="mt-4 border-t border-border pt-4" />
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+
+                <p className="mt-10 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
                   Sentinel-Anfragen ({requests.filter((r) => r.status === "open").length} offen)
                 </p>
                 {requests.length === 0 ? (
@@ -310,7 +407,7 @@ const Shelters = () => {
                               </div>
                             )}
                           </div>
-                          {expanded && app && (
+{expanded && app && (
                             <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 text-xs">
                               <Meta label="Klarname" value={app.full_name} />
                               <Meta label="Kontakt" value={app.email} />
@@ -419,15 +516,18 @@ const ShelterProfileForm = ({
       onSubmit={async (e) => {
         e.preventDefault();
         const regionValue = district ? `${district}, ${state}` : state;
-        // ponytail: auto-geocode address via Nominatim on save
+        // ponytail: auto-geocode address via Photon on save (Nominatim blocks
+        // browser requests per usage policy → coords stayed null → dead map).
+        // Manual lat/lng fields below are the fallback knob.
         let glat = lat, glng = lng;
-        if (!glat && !glng) {
+        if (!glat || !glng) {
           const q = [address, district, state].filter(Boolean).join(", ");
           if (q) try {
-            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`);
-            const data = await res.json() as { lat: string; lon: string }[];
-            if (data[0]) { glat = data[0].lat; glng = data[0].lon; }
-          } catch { /* geocode silent fail */ }
+            const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1`);
+            const data = await res.json() as { features: { geometry: { coordinates: [number, number] } }[] };
+            const coords = data.features?.[0]?.geometry?.coordinates;
+            if (coords) { if (!glng) glng = String(coords[0]); if (!glat) glat = String(coords[1]); }
+          } catch { /* geocode silent fail — manual fields below */ }
         }
         onSave({
           name,
@@ -452,6 +552,19 @@ const ShelterProfileForm = ({
       <Field label="Adresse" value={address} onChange={setAddress} />
       <Field label="Kontakt-E-Mail" value={contactEmail} onChange={setContactEmail} />
       <Field label="Telefon" value={contactPhone} onChange={setContactPhone} />
+      <div className="md:col-span-2 grid gap-5 sm:grid-cols-2">
+        <div>
+          <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Breitengrad (optional)</Label>
+          <Input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="wird aus Adresse ermittelt" className="mt-2" inputMode="decimal" />
+        </div>
+        <div>
+          <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Längengrad (optional)</Label>
+          <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="wird aus Adresse ermittelt" className="mt-2" inputMode="decimal" />
+        </div>
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          Leer lassen — die Koordinaten für die Karte werden beim Speichern automatisch aus der Adresse ermittelt. Nur eintragen, wenn der automatische Treffer falsch liegt.
+        </p>
+      </div>
       <div className="md:col-span-2">
         <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Beschreibung</Label>
         <Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className="mt-2" />

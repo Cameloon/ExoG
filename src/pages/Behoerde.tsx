@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { useAuth } from "@/hooks/useAuth";
@@ -15,10 +15,12 @@ import type { CareLog } from "@/lib/dashboard-data";
 import type { Shelter, Ward } from "@/lib/types";
 import {
   AlertTriangle, ChevronRight, Clock, FileText, MapPin, ShieldCheck,
-  Activity, Building2, PawPrint, Plus, UserPlus, Map as MapIcon, List as ListIcon,
+  Activity, Building2, Map as MapIcon, List as ListIcon,
+  Truck,
 } from "lucide-react";
 import { LazyShelterMap } from "@/components/shelters/LazyShelterMap";
-import { RegionSelect } from "@/components/RegionSelect";
+import { LoadingSnake } from "@/components/ui/loading-snake";
+import { QuestionnaireBlock } from "@/components/QuestionnaireBlock";
 
 type DetailTab = "chain" | "care" | "docs";
 
@@ -43,6 +45,32 @@ const statusLabel: Record<string, string> = {
   withdrawn: "Zurückgezogen",
 };
 
+type TransportLog = {  id: string;
+  ward_id: string;
+  handler_id: string;
+  from_location: string;
+  to_location: string;
+  mode: string;
+  carrier: string;
+  checklist: string[];
+  notes: string;
+  created_at: string;
+};
+
+const quarantineBadge: Record<string, string> = {
+  unknown: "bg-muted text-muted-foreground border-border",
+  in_quarantine: "bg-warning/10 text-warning border-warning/30",
+  quarantine_safe: "bg-success/10 text-success border-success/30",
+  suspected: "bg-destructive/10 text-destructive border-destructive/30",
+};
+
+const quarantineLabel: Record<string, string> = {
+  unknown: "Q unbekannt",
+  in_quarantine: "Quarantäne",
+  quarantine_safe: "Q-Safe",
+  suspected: "Verdacht",
+};
+
 const Behoerde = () => {
   const { user, region, isBehoerde, loading } = useAuth();
   const supabase = useExternalSupabase();
@@ -55,72 +83,27 @@ const Behoerde = () => {
   const [detailTab, setDetailTab] = useState<DetailTab>("chain");
   const [logs, setLogs] = useState<CareLog[]>([]);
   const [logsBusy, setLogsBusy] = useState(false);
-  const [logsCache, setLogsCache] = useState<Record<string, CareLog[]>>({});
+  const [logsCache, setLogsCache] = useState<Record<string, { at: number; logs: CareLog[] }>>({});
   const [showMap, setShowMap] = useState(false);
-  const [showMgmt, setShowMgmt] = useState(false);
-
-  // ponytail: inline ward creation for behoerde
-  const [wf, setWf] = useState({ common_name: "", background: "", care_requirements: "", space_requirements: "", case_code: "" });
-  const [creating, setCreating] = useState(false);
 
   // ponytail: sentinel assignment
-  const [sentinels, setSentinels] = useState<{ user_id: string; full_name: string }[]>([]);
-  const [assigning, setAssigning] = useState<string | null>(null);
+  const [sentinels, setSentinels] = useState<{ user_id: string; full_name: string; capacity: string | null; pledge_data: { questionnaire?: unknown } | null }[]>([]);
   const [assignTo, setAssignTo] = useState<string>("");
+  const [selSentinelId, setSelSentinelId] = useState<string | null>(null);
 
-  // ponytail: behoerde self-set region on first login
-  const [rsState, setRsState] = useState("");
-  const [rsDistrict, setRsDistrict] = useState("");
-  const [rsBusy, setRsBusy] = useState(false);
-
-  const setRegion = async () => {
-    if (!user || !rsState) return;
-    setRsBusy(true);
-    try {
-      const regionValue = rsDistrict ? `${rsDistrict}, ${rsState}` : rsState;
-      const { error } = await supabase.from("profiles").upsert({ id: user.id, region: regionValue });
-      if (error) throw error;
-      toast({ title: "Region gespeichert", description: regionValue });
-      window.location.reload();
-    } catch (e) {
-      toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
-    } finally {
-      setRsBusy(false);
-    }
-  };
+  const [labUrl, setLabUrl] = useState<string | null>(null);
+  const [wardTransports, setWardTransports] = useState<TransportLog[]>([]);
 
   const loadSentinels = useCallback(async () => {
     if (!region) return;
     const { data } = await supabase
       .from("sentinel_applications")
-      .select("user_id, full_name")
+      .select("user_id, full_name, capacity, pledge_data")
       .eq("region", region)
       .eq("status", "approved")
-      .limit(100);
-    setSentinels((data ?? []) as { user_id: string; full_name: string }[]);
+      .range(0, 99);
+    setSentinels((data ?? []) as { user_id: string; full_name: string; capacity: string | null; pledge_data: { questionnaire?: unknown } | null }[]);
   }, [region, supabase]);
-
-  const createWard = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !region) return;
-    setCreating(true);
-    try {
-      const { error } = await supabase.from("ward_listings").insert({
-        owner_id: user.id, region, common_name: wf.common_name.trim(),
-        case_code: wf.case_code.trim(), background: wf.background.trim(),
-        care_requirements: wf.care_requirements.trim(), space_requirements: wf.space_requirements.trim(),
-        urgency: "standard", visibility: "vetted_only",
-      });
-      if (error) throw error;
-      toast({ title: "Ward erstellt" });
-      setWf({ common_name: "", background: "", care_requirements: "", space_requirements: "", case_code: "" });
-      void load();
-    } catch (e) {
-      toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const assignSentinel = async (wardId: string) => {
     if (!assignTo) return;
@@ -128,7 +111,7 @@ const Behoerde = () => {
       const { error } = await supabase.from("ward_listings").update({ owner_id: assignTo }).eq("id", wardId);
       if (error) throw error;
       toast({ title: "Sentinel zugewiesen" });
-      setAssigning(null); setAssignTo("");
+      setAssignTo("");
       void load();
     } catch (e) {
       toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
@@ -136,11 +119,14 @@ const Behoerde = () => {
   };
 
   const loadLogs = async (wardId: string) => {
-    if (logsCache[wardId]) { setLogs(logsCache[wardId]); return; }
+    const hit = logsCache[wardId];
+    // 60 s TTL: log entries change during active care; cached forever would
+    // show stale entries even though the ward list refreshes.
+    if (hit && Date.now() - hit.at < 60_000) { setLogs(hit.logs); return; }
     setLogsBusy(true);
     try {
       const l = await fetchCareLogs(supabase, wardId);
-      setLogsCache((p) => ({ ...p, [wardId]: l }));
+      setLogsCache((p) => ({ ...p, [wardId]: { at: Date.now(), logs: l } }));
       setLogs(l);
     } catch {
       setLogs([]);
@@ -149,11 +135,36 @@ const Behoerde = () => {
     }
   };
 
+  const transportsCache = useRef<Record<string, TransportLog[]>>({});
+  const loadTransports = async (wardId: string) => {
+    if (transportsCache.current[wardId]) { setWardTransports(transportsCache.current[wardId]); return; }
+    const { data } = await supabase
+      .from("transport_logs")
+      .select("*")
+      .eq("ward_id", wardId)
+      .order("created_at", { ascending: false });
+    const rows = (data ?? []) as TransportLog[];
+    transportsCache.current[wardId] = rows;
+    setWardTransports(rows);
+  };
+
   const selectWard = (w: Ward) => {
     setSelected(w);
     setDetailTab("chain");
     void loadLogs(w.id);
+    void loadTransports(w.id);
   };
+
+  const selectedWard = selected ?? wards[0] ?? null;
+
+  useEffect(() => {
+    setLabUrl(null);
+    if (!selectedWard?.lab_report_path) return;
+    supabase.storage
+      .from("lab-docs")
+      .createSignedUrls([selectedWard.lab_report_path], 60 * 60)
+      .then(({ data }) => setLabUrl(data?.[0]?.signedUrl ?? null));
+  }, [selectedWard?.id, selectedWard?.lab_report_path, supabase]);
 
   const load = useCallback(async () => {
     if (!region) return;
@@ -178,17 +189,21 @@ const Behoerde = () => {
     if (isBehoerde && region) { void load(); void loadSentinels(); }
   }, [isBehoerde, region, load, loadSentinels]);
 
-  const filtered = filter === "Alle" ? wards : wards.filter((w) => w.status === filter);
+  const filtered = useMemo(() => (filter === "Alle" ? wards : wards.filter((w) => w.status === filter)), [wards, filter]);
   const defaultWard = wards[0] ?? null;
 
-  // KPIs
-  const activeCount = wards.length;
-  const criticalCount = wards.filter((w) => w.urgency === "kritisch" || w.urgency === "hoch").length;
-  const districtSet = new Set(wards.map((w) => w.region?.split(",")[0]?.trim()).filter(Boolean));
-  const districtCounts = [...districtSet].map((d) => ({
-    d: d ?? "Unbekannt",
-    n: wards.filter((w) => w.region?.startsWith(d ?? "")).length,
-  }));
+  // KPIs — derived once per wards/filter change, not per render.
+  const { activeCount, criticalCount, districtCounts } = useMemo(() => {
+    const districtSet = new Set(wards.map((w) => w.region?.split(",")[0]?.trim()).filter(Boolean));
+    return {
+      activeCount: wards.length,
+      criticalCount: wards.filter((w) => w.urgency === "kritisch" || w.urgency === "hoch").length,
+      districtCounts: [...districtSet].map((d) => ({
+        d: d ?? "Unbekannt",
+        n: wards.filter((w) => w.region?.startsWith(d ?? "")).length,
+      })),
+    };
+  }, [wards]);
 
   const renderKpi = () => (
     <div className="grid gap-px bg-border md:grid-cols-4">
@@ -233,7 +248,9 @@ const Behoerde = () => {
     return (
       <div className="min-h-screen bg-background text-muted-foreground">
         <SiteHeader />
-        <main className="container py-24 text-center">…</main>
+        <main className="container py-24 text-center">
+          <LoadingSnake label="Lade Behörde" />
+        </main>
       </div>
     );
   }
@@ -257,18 +274,13 @@ const Behoerde = () => {
     return (
       <div className="min-h-screen bg-background text-foreground">
         <SiteHeader />
-        <main className="container max-w-xl py-24">
-          <h1 className="font-editorial text-3xl">Zuständigkeitsregion festlegen</h1>
+        <main className="container max-w-xl py-24 text-center">
+          <h1 className="font-editorial text-3xl">Zuständigkeitsregion fehlt</h1>
           <p className="mt-4 text-sm text-muted-foreground">
-            Wähle deine Region — sie wird in deinem Profil gespeichert und
-            bestimmt, welche Einrichtungen und Wards du siehst.
+            Dieser Zugang braucht eine administrativ zugewiesene Region. Bitte
+            einen Admin, die Region in Clerk für dein Behördenkonto zu setzen.
           </p>
-          <div className="mt-8 space-y-4">
-            <RegionSelect state={rsState} district={rsDistrict} onState={setRsState} onDistrict={setRsDistrict} />
-            <Button disabled={!rsState || rsBusy} onClick={setRegion}>
-              {rsBusy ? "Speichere …" : "Region speichern"}
-            </Button>
-          </div>
+          <Button asChild className="mt-6"><Link to="/account">Zum Konto</Link></Button>
         </main>
       </div>
     );
@@ -287,25 +299,23 @@ const Behoerde = () => {
             <h1 className="font-editorial mt-2 text-4xl md:text-5xl">Einzugsgebiet {region}</h1>
             <p className="mt-3 text-muted-foreground">{wards.length} Wards · {shelters.length} Einrichtungen · {sentinels.length} Sentinels</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowMap((v) => !v)}>
               {showMap ? <ListIcon className="mr-2 h-4 w-4" /> : <MapIcon className="mr-2 h-4 w-4" />}
               {showMap ? "Liste" : "Karte"}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowMgmt((v) => !v)}>
-              <Plus className="mr-2 h-4 w-4" /> {showMgmt ? "Dashboard" : "Verwaltung"}
             </Button>
           </div>
         </div>
 
         {busy ? (
-          <p className="mt-10 font-mono text-xs uppercase tracking-[0.22em] text-muted-foreground">Lade …</p>
+          <div className="mt-10 flex justify-center">
+            <LoadingSnake label="Lade Behörde" compact />
+          </div>
         ) : (
           <>
             {/* Dashboard view */}
-            {!showMgmt && (
-              <>
-                {renderKpi()}
+            <>
+              {renderKpi()}
                 {renderRegionDist()}
 
                 {showMap && shelters.length > 0 && (
@@ -347,6 +357,19 @@ const Behoerde = () => {
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                               <span className="font-mono text-[11px] text-primary">{w.case_code}</span>
+                              {w.placement_type === "pflegestelle" && (
+                                <span className="border border-warning/40 bg-warning/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.14em] text-warning">
+                                  Pflegestelle
+                                </span>
+                              )}
+                              {w.legal_custody && (
+                                <span className="border border-warning/40 bg-warning/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.14em] text-warning">
+                                  Verwahrung
+                                </span>
+                              )}
+                              <span className={`border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.14em] ${quarantineBadge[w.quarantine_status] ?? ""}`}>
+                                {quarantineLabel[w.quarantine_status] ?? ""}
+                              </span>
                               <span className={`md:hidden font-mono text-[10px] uppercase ${urgencyColor[w.urgency] ?? ""}`}>● {w.urgency}</span>
                               <span className="md:hidden font-mono text-[10px] text-muted-foreground">{w.cites_listing ?? "—"}</span>
                               <span className={`md:hidden inline-block border px-2 py-0.5 font-mono text-[9px] uppercase ${riskBadge[w.urgency] ?? riskBadge.standard}`}>
@@ -391,6 +414,8 @@ const Behoerde = () => {
                             { l: "Region", v: sel.region ?? "—", icon: MapPin },
                             { l: "Alter", v: sel.age_estimate ?? "—", icon: Clock },
                             { l: "Dringlichkeit", v: sel.urgency, icon: Activity },
+                            { l: "Verwahrung", v: sel.placement_type === "pflegestelle" ? "Pflegestelle (Staats-Eigentum)" : "Endstelle", icon: Building2 },
+                            { l: "Quarantäne", v: quarantineLabel[sel.quarantine_status] ?? "—", icon: ShieldCheck },
                           ].map((m) => (
                             <div key={m.l} className="bg-surface p-4">
                               <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -452,7 +477,9 @@ const Behoerde = () => {
                           <div className="p-6">
                             <span className="eyebrow">Pflege-Einträge</span>
                             {logsBusy ? (
-                              <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Lade …</p>
+                              <div className="mt-4 flex justify-center">
+                                <LoadingSnake label="Lade Pflege" compact />
+                              </div>
                             ) : (
                               <ul className="mt-4 space-y-3">
                                 {logs.map((l, i) => (
@@ -476,10 +503,49 @@ const Behoerde = () => {
 
                         {detailTab === "docs" && (
                           <div className="p-6">
-                            <span className="eyebrow">Dokumente</span>
-                            <p className="mt-4 text-xs text-muted-foreground">
-                              Dokumentenverwaltung folgt in einem späteren Release.
-                            </p>
+                            <span className="eyebrow">Laborbefund</span>
+                            {sel.lab_report_path ? (
+                              labUrl ? (
+                                <a href={labUrl} target="_blank" rel="noopener noreferrer"
+                                  className="mt-3 inline-flex items-center gap-2 text-sm text-primary underline">
+                                  <FileText className="h-4 w-4" /> Laborbefund öffnen
+                                </a>
+                              ) : (
+                                <div className="mt-3 flex justify-start">
+                                  <LoadingSnake label="Lade Befund" compact />
+                                </div>
+                              )
+                            ) : (
+                              <p className="mt-3 text-xs text-muted-foreground">
+                                Kein Labornachweis hinterlegt — Platzierung nur mit Q-Safe möglich.
+                              </p>
+                            )}
+
+                            <div className="mt-6 border-t border-border pt-4">
+                              <span className="eyebrow flex items-center gap-2"><Truck className="h-3.5 w-3.5" /> Transporte</span>
+                              {wardTransports.length === 0 ? (
+                                <p className="mt-3 text-xs text-muted-foreground">Noch kein Transport dokumentiert.</p>
+                              ) : (
+                                <ul className="mt-3 space-y-3">
+                                  {wardTransports.map((t) => (
+                                    <li key={t.id} className="border-l-2 border-primary/40 pl-3">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">
+                                          {t.from_location || "?"} → {t.to_location || "?"}
+                                        </span>
+                                        <span className="font-mono text-[10px] text-muted-foreground">
+                                          {new Date(t.created_at).toLocaleString("de-DE")}
+                                        </span>
+                                      </div>
+                                      <p className="mt-1 text-xs text-muted-foreground">
+                                        {[t.mode, t.carrier, t.checklist.length > 0 ? `Checkliste: ${t.checklist.join(", ")}` : "", t.notes]
+                                          .filter(Boolean).join(" · ")}
+                                      </p>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
                           </div>
                         )}
 
@@ -487,16 +553,28 @@ const Behoerde = () => {
                         <div className="border-t border-border p-6">
                           <span className="eyebrow">Sentinel-Zuweisung</span>
                           {sel.owner_id === user?.id ? (
-                            <div className="mt-3 flex items-center gap-2">
-                              <select value={assignTo} onChange={(e) => setAssignTo(e.target.value)}
-                                className="h-9 flex-1 border border-border bg-background px-2 text-sm"
-                              >
-                                <option value="">Sentinel wählen …</option>
-                                {sentinels.map((s) => (
-                                  <option key={s.user_id} value={s.user_id}>{s.full_name}</option>
-                                ))}
-                              </select>
-                              <Button size="sm" disabled={!assignTo} onClick={() => assignSentinel(sel.id)}>Zuweisen</Button>
+                            <div className="mt-3">
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={assignTo}
+                                  onChange={(e) => { setAssignTo(e.target.value); setSelSentinelId(e.target.value || null); }}
+                                  className="h-9 flex-1 border border-border bg-background px-2 text-sm"
+                                >
+                                  <option value="">Sentinel wählen …</option>
+                                  {sentinels.map((s) => (
+                                    <option key={s.user_id} value={s.user_id}>
+                                      {s.full_name}{s.capacity ? ` — ${s.capacity.slice(0, 60)}` : ""}
+                                    </option>
+                                  ))}
+                                </select>
+                                <Button size="sm" disabled={!assignTo} onClick={() => assignSentinel(sel.id)}>Zuweisen</Button>
+                              </div>
+                              {selSentinelId && sentinels.find((s) => s.user_id === selSentinelId)?.pledge_data?.questionnaire && (
+                                <QuestionnaireBlock
+                                  raw={sentinels.find((s) => s.user_id === selSentinelId)!.pledge_data!.questionnaire}
+                                  className="mt-4 border-t border-border pt-4"
+                                />
+                              )}
                             </div>
                           ) : (
                             <p className="mt-3 text-xs text-muted-foreground">
@@ -509,64 +587,8 @@ const Behoerde = () => {
                   </aside>
                 </div>
               </>
-            )}
-
-            {/* Management view */}
-            {showMgmt && (
-              <div className="mt-8 grid gap-10">
-                {/* Ward creation */}
-                <section>
-                  <h2 className="font-display text-2xl flex items-center gap-2"><PawPrint className="h-5 w-5 text-primary" /> Ward erfassen</h2>
-                  <form onSubmit={createWard} className="mt-4 grid gap-4 border border-border bg-surface p-6 md:grid-cols-2">
-                    <div>
-                      <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Case-Code *</Label>
-                      <Input required value={wf.case_code} onChange={(e) => setWf((p) => ({ ...p, case_code: e.target.value }))} placeholder="WARD-2026-XXX" className="mt-1" />
-                    </div>
-                    <div>
-                      <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Bezeichnung *</Label>
-                      <Input required value={wf.common_name} onChange={(e) => setWf((p) => ({ ...p, common_name: e.target.value }))} placeholder="z. B. Bartagame" className="mt-1" />
-                    </div>
-                    <div className="md:col-span-2">
-                      <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Hintergrund *</Label>
-                      <Textarea required rows={2} value={wf.background} onChange={(e) => setWf((p) => ({ ...p, background: e.target.value }))} className="mt-1" />
-                    </div>
-                    <div>
-                      <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Pflegeanforderungen *</Label>
-                      <Textarea required rows={2} value={wf.care_requirements} onChange={(e) => setWf((p) => ({ ...p, care_requirements: e.target.value }))} className="mt-1" />
-                    </div>
-                    <div>
-                      <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Haltungsanforderungen *</Label>
-                      <Textarea required rows={2} value={wf.space_requirements} onChange={(e) => setWf((p) => ({ ...p, space_requirements: e.target.value }))} className="mt-1" />
-                    </div>
-                    <div className="md:col-span-2 flex justify-end">
-                      <Button type="submit" disabled={creating}>{creating ? "Erstelle …" : "Ward speichern"}</Button>
-                    </div>
-                  </form>
-                </section>
-
-                {/* Einrichtungen */}
-                <section>
-                  <h2 className="font-display text-2xl flex items-center gap-2"><Building2 className="h-5 w-5 text-primary" /> Einrichtungen</h2>
-                  {shelters.length === 0 ? (
-                    <p className="mt-4 text-sm text-muted-foreground">Keine Einrichtungen in {region} erfasst.</p>
-                  ) : (
-                    <ul className="mt-4 divide-y divide-border border border-border bg-surface">
-                      {shelters.map((s) => (
-                        <li key={s.id} className="flex items-center justify-between gap-4 px-5 py-4">
-                          <div className="min-w-0">
-                            <p className="font-medium">{s.name}</p>
-                            <p className="mt-1 truncate text-xs text-muted-foreground">{s.region} · {s.description ?? "—"}</p>
-                          </div>
-                          <Link to={`/shelters/${s.id}`} className="shrink-0 font-mono text-[10px] uppercase tracking-[0.2em] text-primary hover:underline">Profil</Link>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-              </div>
-            )}
-          </>
-        )}
+            </>
+          )}
       </main>
       <SiteFooter />
     </div>

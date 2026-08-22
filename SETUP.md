@@ -52,6 +52,7 @@ Four functions to deploy/create:
 | `kyc-upload` | Create | `external-supabase/functions/kyc-upload/index.ts` |
 | `delete-account` | Create | `external-supabase/functions/delete-account/index.ts` |
 | `send-application-confirmation` | Create (or update if it exists) | `external-supabase/functions/send-application-confirmation/index.ts` |
+| `submit-sentinel-application` | Create (or update if it exists) | `external-supabase/functions/submit-sentinel-application/index.ts` |
 | `set-user-role` | Create | `external-supabase/functions/set-user-role/index.ts` |
 
 ### Secrets

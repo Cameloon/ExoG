@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import type { Shelter, ShelterInput, Ward, ShelterRequest, ShelterRequestInput } from "./types";
+import type { Shelter, ShelterInput, Ward, ShelterRequest, ShelterRequestInput, WardInterest } from "./types";
 
 export async function fetchShelters(
   supabase: SupabaseClient<Database>,
@@ -123,6 +123,32 @@ export async function setRequestStatus(
 ): Promise<void> {
   const { error } = await supabase
     .from("sentinel_shelter_requests")
+    .update({ status })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function fetchWardInterests(
+  supabase: SupabaseClient<Database>,
+  shelterId: string,
+): Promise<WardInterest[]> {
+  const { data, error } = await supabase
+    .from("ward_interest")
+    .select("id, ward_id, applicant_id, message, consultation_requested, status, created_at, ward:ward_listings!inner(common_name, case_code)")
+    .eq("ward_listings.shelter_id", shelterId)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return (data ?? []) as WardInterest[];
+}
+
+export async function setInterestStatus(
+  supabase: SupabaseClient<Database>,
+  id: string,
+  status: "matched" | "declined",
+): Promise<void> {
+  const { error } = await supabase
+    .from("ward_interest")
     .update({ status })
     .eq("id", id);
   if (error) throw error;

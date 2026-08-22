@@ -11,6 +11,7 @@ import { Workflow } from "@/components/sections/Workflow";
 import { Legal } from "@/components/sections/Legal";
 import { CTA } from "@/components/sections/CTA";
 import { useAuth } from "@/hooks/useAuth";
+import { PageLoader } from "@/components/ui/loading-snake";
 
 // Logged-in users are sent straight into the web app (role home); the
 // marketing page is only shown when logged out or via /start.
@@ -57,11 +58,7 @@ export const Landing = () => {
 const Index = () => {
   const { user, role, loading } = useAuth();
   if (loading) {
-    return (
-      <div className="min-h-screen bg-background text-muted-foreground flex items-center justify-center">
-        …
-      </div>
-    );
+    return <PageLoader label="Lade Start" />;
   }
   if (user) return <Navigate to={roleHome[role] ?? "/dashboard"} replace />;
   return <Landing />;

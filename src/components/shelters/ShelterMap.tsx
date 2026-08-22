@@ -17,28 +17,54 @@ const icon = L.icon({
 
 export default function ShelterMap({ shelters }: { shelters: Shelter[] }) {
   const withPos = shelters.filter((s) => s.lat != null && s.lng != null);
-  const center =
-    withPos[0]?.lat != null && withPos[0]?.lng != null
-      ? ([withPos[0].lat, withPos[0].lng] as [number, number])
-      : ([51.1657, 10.4515] as [number, number]); // DE center fallback
+
+  // No coordinates at all → show a hint instead of a markerless Germany map
+  // that looks broken. (Geocoding runs on shelter save via Photon.)
+  if (withPos.length === 0) {
+    return (
+      <div className="flex h-80 items-center justify-center border border-border text-center text-xs text-muted-foreground">
+        Keine Koordinaten hinterlegt — Adresse in der Einrichtungsverwaltung speichern, um sie auf der Karte zu sehen.
+      </div>
+    );
+  }
+
+  // Fit the map to the markers: one shelter → local zoom, several → bounds.
+  const single = withPos.length === 1;
+  const pos: [number, number][] = withPos.map((s) => [s.lat as number, s.lng as number]);
 
   return (
     <div className="h-80 w-full overflow-hidden border border-border">
-      <MapContainer center={center} zoom={6} className="h-full w-full" scrollWheelZoom={false}>
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        {withPos.map((s) => (
-          <Marker key={s.id} position={[s.lat as number, s.lng as number]} icon={icon}>
+      {single ? (
+        <MapContainer center={pos[0]} zoom={13} className="h-full w-full" scrollWheelZoom={false}>
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <Marker position={pos[0]} icon={icon}>
             <Popup>
-              <strong>{s.name}</strong>
+              <strong>{withPos[0].name}</strong>
               <br />
-              {s.region}
+              {withPos[0].region}
             </Popup>
           </Marker>
-        ))}
-      </MapContainer>
+        </MapContainer>
+      ) : (
+        <MapContainer bounds={L.latLngBounds(pos)} className="h-full w-full" scrollWheelZoom={false}>
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          {withPos.map((s) => (
+            <Marker key={s.id} position={[s.lat as number, s.lng as number]} icon={icon}>
+              <Popup>
+                <strong>{s.name}</strong>
+                <br />
+                {s.region}
+              </Popup>
+            </Marker>
+          ))}
+        </MapContainer>
+      )}
     </div>
   );
 }

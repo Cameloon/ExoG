@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
@@ -10,6 +10,7 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { LoadingSnake } from "@/components/ui/loading-snake";
 import { toast } from "@/hooks/use-toast";
 import { CheckCircle2, ChevronRight, FileText, XCircle, Clock, Eye } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -77,6 +78,10 @@ const Admin = () => {
     { id: string; user_id: string; email: string; display_name: string | null; status: string }[]
   >([]);
   const [shelterBusy, setShelterBusy] = useState(false);
+  const [changeReqs, setChangeReqs] = useState<
+    { id: string; user_id: string; status: string; full_name: string | null; requested: Record<string, unknown>; created_at: string }[]
+  >([]);
+  const [changeBusy, setChangeBusy] = useState(false);
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [changes, setChanges] = useState<ChangeRow[]>([]);
   const [roleUserId, setRoleUserId] = useState("");
@@ -87,6 +92,8 @@ const Admin = () => {
   const setUserRole = async () => {
     const uid = roleUserId.trim();
     if (!uid) return;
+    const label = roleRole === "behoerde" ? "Behörde" : roleRole === "einrichtung" ? "Einrichtung" : roleRole === "admin" ? "Admin" : roleRole;
+    if (!window.confirm(`Rolle "${label}" für ${uid} setzen? Änderung wird protokolliert.`)) return;
     setRoleBusy(true);
     try {
       const token = await getToken();
@@ -100,6 +107,17 @@ const Admin = () => {
         }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? `HTTP ${res.status}`);
+      // Persisted audit: role grants used to exist only in the edge function's
+      // console log. role_change_log (00024) is admin-insert only, append-only.
+      if (user) {
+        const { error: auditErr } = await supabase.from("role_change_log").insert({
+          actor_id: user.id,
+          target_user_id: uid,
+          role: roleRole,
+          region: roleRole === "behoerde" ? roleRegion.trim() || null : null,
+        });
+        if (auditErr) throw new Error(`Rolle gesetzt, aber Protokollierung fehlgeschlagen: ${auditErr.message}`);
+      }
       toast({ title: "Rolle gesetzt", description: `${uid} → ${roleRole}${roleRegion.trim() ? ` · ${roleRegion.trim()}` : ""}` });
       setRoleUserId("");
       setRoleRegion("");
@@ -114,24 +132,30 @@ const Admin = () => {
     document.title = "Admin · BioSteward";
   }, []);
 
-  const load = useCallback(async () => {
+  const appPageRef = useRef(0);
+  const [appsHasMore, setAppsHasMore] = useState(false);
+
+  const load = useCallback(async (reset = false) => {
+    const from = reset ? 0 : appPageRef.current;
     let q = supabase
       .from("sentinel_applications")
       .select("*")
       .order("created_at", { ascending: false })
-      // ponytail: hard cap, add .range() paging when the queue outgrows 100
-      .limit(100);
+      .range(from, from + 99);
     if (filter !== "all") q = q.eq("status", filter);
     const { data, error } = await q;
     if (error) {
       toast({ title: "Load failed", description: error.message, variant: "destructive" });
       return;
     }
-    setApps((data ?? []) as Application[]);
+    const rows = (data ?? []) as Application[];
+    setApps(reset ? rows : (prev) => [...prev, ...rows]);
+    appPageRef.current = reset ? rows.length : appPageRef.current + rows.length;
+    setAppsHasMore(rows.length === 100);
   }, [filter, supabase]);
 
   useEffect(() => {
-    if (isAdmin) load();
+    if (isAdmin) load(true);
   }, [isAdmin, load]);
 
   const loadShelterReqs = useCallback(async () => {
@@ -139,7 +163,7 @@ const Admin = () => {
       .from("pending_shelter_requests")
       .select("id, user_id, email, display_name, status")
       .order("created_at", { ascending: false })
-      .limit(100);
+      .range(0, 99);
     if (error) {
       toast({ title: "Load failed", description: error.message, variant: "destructive" });
       return;
@@ -151,13 +175,103 @@ const Admin = () => {
     if (isAdmin) void loadShelterReqs();
   }, [isAdmin, loadShelterReqs]);
 
+  // Sentinel address-change requests (00027). Approve writes the new address
+  // into the application's pledge_data so profile + network map pick it up.
+  const loadChangeReqs = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("sentinel_change_requests")
+      .select("id, user_id, requested, status, created_at")
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .range(0, 49);
+    if (error) {
+      toast({ title: "Load failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    const uids = [...new Set((data ?? []).map((r) => r.user_id))];
+    let names: Record<string, string> = {};
+    if (uids.length) {
+      const { data: appRows } = await supabase
+        .from("sentinel_applications")
+        .select("user_id, full_name")
+        .in("user_id", uids);
+      names = Object.fromEntries((appRows ?? []).map((a) => [a.user_id, a.full_name]));
+    }
+    setChangeReqs(
+      (data ?? []).map((r) => ({
+        id: r.id,
+        user_id: r.user_id,
+        status: r.status,
+        full_name: names[r.user_id] ?? null,
+        requested: (r.requested ?? {}) as Record<string, unknown>,
+        created_at: r.created_at,
+      })),
+    );
+  }, [supabase]);
+
+  useEffect(() => {
+    if (isAdmin) void loadChangeReqs();
+  }, [isAdmin, loadChangeReqs]);
+
+  const decideChange = async (id: string, userId: string, approve: boolean) => {
+    if (!user) return;
+    setChangeBusy(true);
+    try {
+      if (approve) {
+        const { data: app, error: appErr } = await supabase
+          .from("sentinel_applications")
+          .select("user_id, pledge_data")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (appErr) throw appErr;
+        if (!app) throw new Error("Kein Sentinel-Antrag für diesen Nutzer gefunden.");
+        const pledge = (app.pledge_data ?? {}) as { questionnaire?: Record<string, unknown> };
+        const req = changeReqs.find((r) => r.id === id) as { requested: Record<string, unknown> } | undefined;
+        if (!req) throw new Error("Request not found");
+        const { error: upErr } = await supabase
+          .from("sentinel_applications")
+          .update({
+            pledge_data: {
+              ...pledge,
+              questionnaire: {
+                ...(pledge.questionnaire ?? {}),
+                street: (req.requested?.street as string) ?? "",
+                house_number: (req.requested?.house_number as string) ?? "",
+                zip: (req.requested?.zip as string) ?? "",
+                city: (req.requested?.city as string) ?? "",
+              },
+            },
+          })
+          .eq("user_id", userId);
+        if (upErr) throw upErr;
+      }
+      const { error } = await supabase
+        .from("sentinel_change_requests")
+        .update({
+          status: approve ? "approved" : "rejected",
+          reviewed_by: user.id,
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+      if (error) throw error;
+      toast({ title: approve ? "Adresse übernommen" : "Änderung abgelehnt" });
+      await loadChangeReqs();
+    } catch (e) {
+      toast({ title: "Update failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setChangeBusy(false);
+    }
+  };
+
   // Global custody-table audit trail (00011 change_log, written by DB triggers).
   const loadChanges = useCallback(async () => {
     const { data, error } = await supabase
       .from("change_log")
       .select("id, actor_id, action, table_name, record_id, changed_at")
       .order("changed_at", { ascending: false })
-      .limit(50);
+      .range(0, 49);
     if (error) {
       toast({ title: "Load failed", description: error.message, variant: "destructive" });
       return;
@@ -229,6 +343,7 @@ const Admin = () => {
 
   const setStatus = async (newStatus: Status) => {
     if (!selected || !user) return;
+    if (newStatus !== selected.status && !window.confirm(`Status auf "${newStatus}" setzen?`)) return;
     setBusy(true);
     try {
       const { error } = await supabase
@@ -243,7 +358,9 @@ const Admin = () => {
         .eq("id", selected.id);
       if (error) throw error;
 
-      await supabase.from("application_audit_log").insert({
+      // Audit insert is part of the transaction: if it fails, revert the
+      // status change so an unlogged decision is never left half-applied.
+      const { error: auditErr } = await supabase.from("application_audit_log").insert({
         application_id: selected.id,
         actor_id: user.id,
         action: "status_change",
@@ -251,10 +368,17 @@ const Admin = () => {
         to_status: newStatus,
         notes,
       });
+      if (auditErr) {
+        await supabase
+          .from("sentinel_applications")
+          .update({ status: selected.status, kyc_status: selected.kyc_status as "rejected" | "not_started" | "documents_uploaded" | "verified", reviewer_notes: selected.reviewer_notes ?? null })
+          .eq("id", selected.id);
+        throw auditErr;
+      }
 
       toast({ title: `Status: ${newStatus}` });
       setSelected(null);
-      await load();
+      await load(true);
     } catch (e) {
       toast({ title: "Update failed", description: (e as Error).message, variant: "destructive" });
     } finally {
@@ -266,7 +390,9 @@ const Admin = () => {
     return (
       <div className="min-h-screen bg-background text-muted-foreground">
         <SiteHeader />
-        <main className="container py-24 text-center">…</main>
+        <main className="container py-24 text-center">
+          <LoadingSnake label="Lade Admin" />
+        </main>
       </div>
     );
   }
@@ -321,6 +447,38 @@ const Admin = () => {
                   )}
                 </li>
               ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Sentinel address-change queue */}
+        <div className="mt-8 border border-border bg-surface p-6">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+            Sentinel · Adressänderungen
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Freigabe übernimmt die neue Adresse in das Sentinel-Profil (sichtbar für Netzwerk, Behörden-Karte und Zuweisung).
+          </p>
+          {changeReqs.length === 0 ? (
+            <p className="mt-3 text-sm text-muted-foreground">Keine offenen Änderungsanträge.</p>
+          ) : (
+            <ul className="mt-4 divide-y divide-border">
+              {changeReqs.map((r) => {
+                const a = (r.requested ?? {}) as { street?: string; house_number?: string; zip?: string; city?: string };
+                return (
+                  <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-4">
+                    <div>
+                      <p className="text-sm font-medium">{r.full_name ?? r.user_id}</p>
+                      <p className="mt-1 text-xs text-muted-foreground font-mono">{r.user_id}</p>
+                      <p className="mt-1 text-sm">{a.street} {a.house_number}, {a.zip} {a.city}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" disabled={changeBusy} onClick={() => decideChange(r.id, r.user_id, true)}>Übernehmen</Button>
+                      <Button size="sm" variant="ghost" disabled={changeBusy} onClick={() => decideChange(r.id, r.user_id, false)}>Ablehnen</Button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -417,6 +575,13 @@ const Admin = () => {
                   </li>
                 ))}
               </ul>
+            )}
+            {appsHasMore && (
+              <div className="border-t border-border p-3 text-center">
+                <Button size="sm" variant="outline" onClick={() => void load()}>
+                  Weitere Anträge laden
+                </Button>
+              </div>
             )}
           </div>
 

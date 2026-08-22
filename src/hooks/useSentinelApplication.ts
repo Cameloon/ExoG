@@ -13,6 +13,7 @@ export function useSentinelApplication() {
   const supabase = useExternalSupabase();
   const [status, setStatus] = useState<SentinelAppStatus>(null);
   const [checking, setChecking] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (loading || !user) {
@@ -21,22 +22,27 @@ export function useSentinelApplication() {
     }
     let active = true;
     (async () => {
-      const { data } = await supabase
+      // ponytail: a transient network error must not read as "no application"
+      // — that would let the user re-apply and hit a server 409.
+      const { data, error: err } = await supabase
         .from("sentinel_applications")
         .select("status")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (active) {
+      if (!active) return;
+      if (err) {
+        setError(err.message);
+      } else {
         setStatus((data as { status: SentinelAppStatus } | null)?.status ?? null);
-        setChecking(false);
       }
+      setChecking(false);
     })();
     return () => {
       active = false;
     };
   }, [user, loading, supabase]);
 
-  return { status, checking, hasApplication: status !== null, isApproved: status === "approved" };
+  return { status, checking, error, hasApplication: status !== null, isApproved: status === "approved" };
 }

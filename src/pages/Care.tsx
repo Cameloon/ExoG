@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SentinelView } from "@/components/dashboard/SentinelView";
+import { PageLoader } from "@/components/ui/loading-snake";
 
 // Live care-log workspace (wards + persistent, hash-chained logs) for ward
 // owners: sentinels and Einrichtungen. The demo twin lives at /demo.
@@ -15,11 +16,7 @@ const Care = () => {
   }, []);
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-background text-muted-foreground flex items-center justify-center">
-        …
-      </div>
-    );
+    return <PageLoader label="Lade Pflege" />;
   }
   if (!user) return <Navigate to="/auth" state={{ from: "/care" }} replace />;
   if (role !== "sentinel" && role !== "einrichtung" && role !== "admin") {

@@ -31,4 +31,19 @@ export default defineConfig(({ mode }) => ({
       "@tanstack/query-core",
     ],
   },
+
+  build: {
+    rollupOptions: {
+      output: {
+        // Stable, cacheable vendor chunks — otherwise the mixed main chunk
+        // (~190 kB gz) re-downloads on every deploy.
+        manualChunks: {
+          "react-vendor": ["react", "react-dom", "react-router-dom", "react-hook-form"],
+          clerk: ["@clerk/clerk-react"],
+          supabase: ["@supabase/supabase-js"],
+          charts: ["jspdf", "jszip"],
+        },
+      },
+    },
+  },
 }));

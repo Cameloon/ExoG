@@ -686,6 +686,20 @@ const PixelBlast: React.FC<PixelBlastProps> = ({
     speed
   ]);
 
+  // Offscreen pause: the shader runs at 60fps; stop rendering while the
+  // container is out of view (previously visibilityRef was never written).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    visibilityRef.current.visible = true;
+    const io = new IntersectionObserver(
+      ([entry]) => { visibilityRef.current.visible = entry.isIntersecting; },
+      { rootMargin: "200px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
   return (
     <div
       ref={containerRef}

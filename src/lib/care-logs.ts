@@ -3,7 +3,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import type { CareLog, CaseRecord, SentinelProfile } from "./dashboard-data";
-import { sign } from "./care-log-validation";
 import { parseCapacity, totalCapacity } from "./habitats";
 
 type Client = SupabaseClient<Database>;
@@ -16,6 +15,14 @@ export type WardRow = {
   cites_listing: string | null;
   age_estimate: string | null;
   region: string | null;
+  status: string | null;
+};
+
+const statusLabel: Record<string, string> = {
+  available: "Verfügbar",
+  under_review: "In Prüfung",
+  placed: "Vermittelt",
+  withdrawn: "Zurückgezogen",
 };
 
 /** Map a real ward onto the demo CaseRecord shape so the existing UI works. */
@@ -25,7 +32,7 @@ export function wardToCase(w: WardRow): CaseRecord {
     species: w.scientific_name ?? "—",
     german: w.common_name,
     cites: w.cites_listing ?? "—",
-    status: "Pflege",
+    status: (statusLabel[w.status ?? ""] ?? "Pflege") as CaseRecord["status"],
     region: w.region ?? "—",
     authority: "—",
     age: w.age_estimate ?? "—",
@@ -35,13 +42,14 @@ export function wardToCase(w: WardRow): CaseRecord {
   };
 }
 
-export async function fetchMyWards(client: Client, userId: string): Promise<WardRow[]> {
+export async function fetchMyWards(client: Client, userId: string, page = 0, pageSize = 100): Promise<WardRow[]> {
+  const from = page * pageSize;
   const { data, error } = await client
     .from("ward_listings")
-    .select("id, case_code, common_name, scientific_name, cites_listing, age_estimate, region")
+    .select("id, case_code, common_name, scientific_name, cites_listing, age_estimate, region, status")
     .eq("owner_id", userId)
     .order("created_at", { ascending: false })
-    .limit(100);
+    .range(from, from + pageSize - 1);
   if (error) throw error;
   return (data ?? []) as WardRow[];
 }
@@ -73,21 +81,34 @@ const toCareLog = (r: LogRow): CareLog => ({
   signature: r.hash,
 });
 
-export async function fetchCareLogs(client: Client, wardId: string): Promise<CareLog[]> {
+export async function fetchCareLogs(client: Client, wardId: string, page = 0, pageSize = 200): Promise<CareLog[]> {
+  const from = page * pageSize;
   const { data, error } = await client
     .from("care_logs")
     .select("ward_id, author_name, type, note, rationale, metrics, hash, created_at")
     .eq("ward_id", wardId)
     .order("created_at", { ascending: false })
-    // ponytail: newest 200 shown, add paging when a ward outgrows it
-    .limit(200);
+    .range(from, from + pageSize - 1);
   if (error) throw error;
   return ((data ?? []) as LogRow[]).map(toCareLog);
 }
 
+/**
+ * All logs for a ward, looping pages until exhausted. The care log is the
+ * audit document — silently truncating at 200 rows hides evidence from the
+ * UI and the export.
+ */
+export async function fetchAllCareLogs(client: Client, wardId: string, pageSize = 200): Promise<CareLog[]> {
+  const out: CareLog[] = [];
+  for (let page = 0; ; page++) {
+    const rows = await fetchCareLogs(client, wardId, page, pageSize);
+    out.push(...rows);
+    if (rows.length < pageSize) return out;
+  }
+}
+
 export type NewCareLog = {
   wardId: string;
-  authorId: string;
   authorName: string;
   type: CareLog["type"];
   note: string;
@@ -95,55 +116,21 @@ export type NewCareLog = {
   metrics: CareLog["metrics"];
 };
 
-/**
- * Append one entry, hash-chained to the ward's previous entry so later
- * tampering with history breaks the chain.
- * ponytail: concurrent writers can fork the chain (same prev_hash) — add a
- * DB-side sequence/lock if multi-author wards ever matter.
- */
+/** Append one entry through the DB-side lock/hash RPC. */
 export async function addCareLog(client: Client, input: NewCareLog): Promise<CareLog> {
-  const { data: last } = await client
-    .from("care_logs")
-    .select("hash")
-    .eq("ward_id", input.wardId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const prevHash = (last as { hash: string } | null)?.hash ?? null;
-  const ts = new Date().toISOString();
-  const hash = sign(
-    [input.wardId, input.type, input.note, input.rationale, input.authorName, ts, prevHash ?? ""].join("|"),
-  );
-
-  const { error } = await client.from("care_logs").insert({
-    ward_id: input.wardId,
-    author_id: input.authorId,
-    author_name: input.authorName,
-    type: input.type,
-    note: input.note,
-    rationale: input.rationale,
-    metrics: input.metrics ?? {},
-    prev_hash: prevHash,
-    hash,
+  const { data, error } = await client.rpc("append_care_log", {
+    p_ward_id: input.wardId,
+    p_author_name: input.authorName,
+    p_type: input.type,
+    p_note: input.note,
+    p_rationale: input.rationale,
+    p_metrics: input.metrics ?? {},
   });
   if (error) throw error;
 
-  return {
-    ts: new Date(ts).toLocaleString("de-DE", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-    author: input.authorName,
-    type: input.type,
-    note: input.note,
-    rationale: input.rationale,
-    metrics: input.metrics,
-    signature: hash,
-  };
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error("care log insert returned no row");
+  return toCareLog(row as LogRow);
 }
 
 /** Live SentinelProfile built from the user's approved application. */
@@ -156,7 +143,7 @@ export async function fetchLiveSentinelProfile(
 ): Promise<SentinelProfile> {
   const { data } = await client
     .from("sentinel_applications")
-    .select("full_name, email, region, capacity, created_at")
+    .select("full_name, email, region, capacity, tier, created_at, pledge_data")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -167,19 +154,33 @@ export async function fetchLiveSentinelProfile(
     email: string;
     region: string;
     capacity: string;
+    tier: "S4" | "S1" | "S2" | "S3";
     created_at: string;
+    pledge_data: {
+      questionnaire?: {
+        street?: string;
+        house_number?: string;
+        zip?: string;
+        city?: string;
+        phone?: string;
+      };
+    } | null;
   } | null;
 
   const total = app ? totalCapacity(parseCapacity(app.capacity)) : 0;
+  const q = app?.pledge_data?.questionnaire;
+  const address = q && (q.street || q.house_number)
+    ? `${q.street ?? ""} ${q.house_number ?? ""}, ${q.zip ?? ""} ${q.city ?? ""}`
+    : "";
   return {
     name: app?.full_name ?? fallbackName,
     region: app?.region ?? "—",
-    tier: "S1", // ponytail: tiers don't exist in the live schema yet
+    tier: app?.tier ?? "S1",
     joined: app
       ? new Date(app.created_at).toLocaleDateString("de-DE", { month: "long", year: "numeric" })
       : "—",
     reactionMinutes: 0,
-    contact: { email: app?.email ?? fallbackEmail, phone: "", address: "" },
+    contact: { email: app?.email ?? fallbackEmail, phone: q?.phone ?? "", address },
     capacity: { used: wardCount, total },
     cases: [],
     certifications: [],
