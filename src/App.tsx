@@ -12,6 +12,7 @@ import "@/i18n";
 // AppShell (Clerk + Supabase, ~90 kB gz) is its own lazy chunk — public pages
 // never fetch the auth runtime.
 const Landing = lazy(() => import("./pages/Index.tsx").then((m) => ({ default: m.Landing })));
+const LandingV2 = lazy(() => import("./pages/LandingV2.tsx"));
 const Pledge = lazy(() => import("./pages/Pledge.tsx"));
 const Werte = lazy(() => import("./pages/Werte.tsx"));
 const Impressum = lazy(() => import("./pages/Legal.tsx").then((m) => ({ default: m.Impressum })));
@@ -52,6 +53,7 @@ const App = () => {
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/start" element={<Landing />} />
+              <Route path="/v2" element={<LandingV2 />} />
               <Route path="/pledge" element={<Pledge />} />
               <Route path="/werte" element={<Werte />} />
               <Route path="/impressum" element={<Impressum />} />
