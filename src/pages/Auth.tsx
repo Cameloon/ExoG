@@ -50,6 +50,11 @@ const Auth = () => {
   const [displayName, setDisplayName] = useState("");
   const [code, setCode] = useState("");
   const [needsVerification, setNeedsVerification] = useState(false);
+  // Zweiter Faktor (TOTP / Backup-Code / E-Mail- / SMS-Code) nach Passwort-Login.
+  const [secondFactors, setSecondFactors] = useState<
+    { strategy: string; emailAddressId?: string; phoneNumberId?: string; safeIdentifier?: string }[]
+  >([]);
+  const [secondStrategy, setSecondStrategy] = useState("");
   const [busy, setBusy] = useState(false);
   const supabase = useExternalSupabase();
   // Self-service role choice at signup: sentinel (→ KYC application) or
@@ -148,6 +153,20 @@ const Auth = () => {
       }
 
       if (!signInFlow.isLoaded) throw new Error("Clerk ist noch nicht bereit.");
+
+      // Bereits im zweiten Faktor? Code prüfen.
+      if (secondFactors.length > 0) {
+        const res = await signInFlow.signIn.attemptSecondFactor({
+          strategy: secondStrategy as "totp",
+          code,
+        });
+        if (res.status === "complete") {
+          await finishAuth(res.createdSessionId, signInFlow.setActive);
+          return;
+        }
+        throw new Error("Code ungültig oder abgelaufen — bitte erneut versuchen.");
+      }
+
       const result = await signInFlow.signIn.create({
         identifier: email,
         password,
@@ -156,6 +175,25 @@ const Auth = () => {
 
       if (result.status === "complete") {
         await finishAuth(result.createdSessionId, signInFlow.setActive);
+        return;
+      }
+
+      if (result.status === "needs_second_factor") {
+        const factors = ((result.supportedSecondFactors ?? []) as {
+          strategy: string; emailAddressId?: string; phoneNumberId?: string; safeIdentifier?: string;
+        }[]).filter((f) => ["totp", "backup_code", "email_code", "phone_code"].includes(f.strategy));
+        if (factors.length === 0) throw new Error("Für dieses Konto ist ein weiterer Anmeldeschritt erforderlich.");
+        const first = factors[0];
+        // E-Mail-/SMS-Code muss erst versendet werden; TOTP/Backup-Code nicht.
+        if (first.strategy === "email_code" && first.emailAddressId) {
+          await signInFlow.signIn.prepareSecondFactor({ strategy: "email_code", emailAddressId: first.emailAddressId });
+        } else if (first.strategy === "phone_code" && first.phoneNumberId) {
+          await signInFlow.signIn.prepareSecondFactor({ strategy: "phone_code", phoneNumberId: first.phoneNumberId });
+        }
+        setSecondFactors(factors);
+        setSecondStrategy(first.strategy);
+        setCode("");
+        toast({ title: "Zweiter Faktor erforderlich", description: "Bitte Code aus deiner zweiten Anmeldemethode eingeben." });
         return;
       }
 
@@ -174,7 +212,36 @@ const Auth = () => {
   const toggleMode = () => {
     setMode((current) => (current === "signup" ? "signin" : "signup"));
     setNeedsVerification(false);
+    setSecondFactors([]);
+    setSecondStrategy("");
     setCode("");
+  };
+
+  const secondFactorLabel: Record<string, string> = {
+    totp: "Authenticator-App",
+    backup_code: "Backup-Code",
+    email_code: "E-Mail-Code",
+    phone_code: "SMS-Code",
+  };
+
+  const switchSecondStrategy = async (strategy: string) => {
+    if (!signInFlow.isLoaded || !signInFlow.signIn) return;
+    const f = secondFactors.find((x) => x.strategy === strategy);
+    if (!f || strategy === secondStrategy) return;
+    setBusy(true);
+    try {
+      if (strategy === "email_code" && f.emailAddressId) {
+        await signInFlow.signIn.prepareSecondFactor({ strategy: "email_code", emailAddressId: f.emailAddressId });
+      } else if (strategy === "phone_code" && f.phoneNumberId) {
+        await signInFlow.signIn.prepareSecondFactor({ strategy: "phone_code", phoneNumberId: f.phoneNumberId });
+      }
+      setSecondStrategy(strategy);
+      setCode("");
+    } catch (err) {
+      toast({ title: t("auth.error"), description: getClerkErrorMessage(err), variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -186,7 +253,50 @@ const Auth = () => {
         <p className="mt-3 text-sm text-muted-foreground">{t("auth.subtitle")}</p>
 
         <form onSubmit={submit} className="mt-10 space-y-5 border border-border bg-surface p-6">
-          {mode === "signup" && !needsVerification && (
+          {mode === "signin" && secondFactors.length > 0 ? (
+            <>
+              <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+                Schritt 2 / 2 · Zwei-Faktor-Bestätigung
+              </p>
+              <div>
+                <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                  Methode wählen
+                </Label>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {secondFactors.map((f) => (
+                    <button
+                      type="button"
+                      key={f.strategy}
+                      onClick={() => switchSecondStrategy(f.strategy)}
+                      className={`border px-3 py-3 text-left transition-colors ${
+                        secondStrategy === f.strategy
+                          ? "border-primary bg-primary/10"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <span className="block font-mono text-[10px] uppercase tracking-[0.18em] text-foreground">
+                        {secondFactorLabel[f.strategy] ?? f.strategy}
+                      </span>
+                      {f.safeIdentifier && (
+                        <span className="mt-1 block truncate text-[11px] text-muted-foreground">{f.safeIdentifier}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                  Code
+                </Label>
+                <Input inputMode="numeric" required value={code} onChange={(e) => setCode(e.target.value)} className="mt-2" autoComplete="one-time-code" />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {secondStrategy === "backup_code"
+                    ? "Einen deiner Backup-Codes eingeben."
+                    : "Code aus der gewählten zweiten Methode eingeben."}
+                </p>
+              </div>
+            </>
+          ) : mode === "signup" && !needsVerification && (
             <>
               <div>
                 <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
@@ -256,8 +366,21 @@ const Auth = () => {
             </div>
           )}
           <Button type="submit" disabled={busy || !signInFlow.isLoaded || !signUpFlow.isLoaded} className="w-full">
-            {busy ? "…" : needsVerification ? t("auth.confirmCode") : mode === "signup" ? t("auth.signUp") : t("auth.signIn")}
+            {busy ? "…" : secondFactors.length > 0 ? "Code bestätigen" : needsVerification ? t("auth.confirmCode") : mode === "signup" ? t("auth.signUp") : t("auth.signIn")}
           </Button>
+          {secondFactors.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setSecondFactors([]);
+                setSecondStrategy("");
+                setCode("");
+              }}
+              className="block w-full text-center font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground hover:text-foreground"
+            >
+              ← Zurück zur Passwort-Anmeldung
+            </button>
+          )}
           {!needsVerification && (
             <button
               type="button"

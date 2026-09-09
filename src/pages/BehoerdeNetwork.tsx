@@ -1,27 +1,18 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import iconUrl from "leaflet/dist/images/marker-icon.png";
-import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png";
-import shadowUrl from "leaflet/dist/images/marker-shadow.png";
+import { GlowMap } from "@/components/GlowMap";
+import { mapRegionToState } from "@/lib/regionMap";
+import { geocode } from "@/lib/geocode";
+
+// bklit/visx (~180 kB) nur laden, wenn der Deutschland-Tab geöffnet wird.
+const GermanyMap = lazy(() => import("@/components/GermanyMap").then((m) => ({ default: m.GermanyMap })));
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { useAuth } from "@/hooks/useAuth";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Button } from "@/components/ui/button";
 import { LoadingSnake } from "@/components/ui/loading-snake";
-import { Map as MapIcon, List, MapPin, Container, ShieldCheck, GraduationCap, Boxes, PawPrint, Thermometer, Lightbulb, Stethoscope, Phone } from "lucide-react";
-
-// Leaflet marker assets (same pattern as ShelterMap — CSP-safe, no CDN).
-const marker = L.icon({
-  iconUrl,
-  iconRetinaUrl,
-  shadowUrl,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-});
+import { Map as MapIcon, List, Globe, MapPin, Container, ShieldCheck, GraduationCap, Boxes, PawPrint, Thermometer, Lightbulb, Stethoscope, Phone } from "lucide-react";
 
 type NetworkSentinel = {
   user_id: string;
@@ -76,68 +67,18 @@ const quarantineLabel: Record<string, string> = {
   no: "Quarantäne: Nein",
 };
 
-// ponytail: client-side Photon geocode (same provider as shelter save), cached
-// per query for the session. Fails silently → sentinels without coordinates
-// just don't get a marker.
-const geocodeCache = new Map<string, [number, number] | null>();
-async function geocode(query: string): Promise<[number, number] | null> {
-  const key = query;
-  if (geocodeCache.has(key)) return geocodeCache.get(key)!;
-  try {
-    const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(key)}&limit=1`);
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      features?: { geometry?: { coordinates?: [number, number] } }[];
-    };
-    const pos = data.features?.[0]?.geometry?.coordinates;
-    const r = pos ? ([pos[1], pos[0]] as [number, number]) : null;
-    geocodeCache.set(key, r);
-    return r;
-  } catch {
-    geocodeCache.set(key, null);
-    return null;
-  }
-}
-
-const SentinelMap = ({ points }: { points: { key: string; name: string; tier: string | null; capacity: string | null; lat: number; lng: number }[] }) => {
-  const single = points.length === 1;
-  const pos: [number, number][] = points.map((p) => [p.lat, p.lng]);
-  return (
-    <div className="h-96 w-full overflow-hidden border border-border">
-      {single ? (
-        <MapContainer center={pos[0]} zoom={13} className="h-full w-full" scrollWheelZoom={false}>
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          <Marker position={pos[0]} icon={marker}>
-            <Popup>
-              <strong>{points[0].name}</strong>
-              <br />
-              {points[0].tier ?? "—"} · {points[0].capacity}
-            </Popup>
-          </Marker>
-        </MapContainer>
-      ) : (
-        <MapContainer bounds={L.latLngBounds(pos)} className="h-full w-full" scrollWheelZoom={false}>
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          {points.map((p) => (
-            <Marker key={p.key} position={[p.lat, p.lng]} icon={marker}>
-              <Popup>
-                <strong>{p.name}</strong>
-                <br />
-                {p.tier ?? "—"} · {p.capacity}
-              </Popup>
-            </Marker>
-          ))}
-        </MapContainer>
-      )}
-    </div>
-  );
-};
+const SentinelMap = ({ points }: { points: { key: string; name: string; tier: string | null; capacity: string | null; lat: number; lng: number }[] }) => (
+  <GlowMap
+    points={points.map((p) => ({
+      key: p.key,
+      name: p.name,
+      detail: `${p.tier ?? "—"} · ${p.capacity ?? ""}`,
+      lat: p.lat,
+      lng: p.lng,
+      tone: p.tier === "S4" ? "success" : "primary",
+    }))}
+  />
+);
 
 const Detail = ({ icon, label, value }: { icon: React.ReactNode; label: string; value?: string }) =>
   value ? (
@@ -197,7 +138,12 @@ const BehoerdeNetwork = () => {
   const supabase = useExternalSupabase();
   const [sentinels, setSentinels] = useState<NetworkSentinel[]>([]);
   const [busy, setBusy] = useState(true);
-  const [view, setView] = useState<"list" | "map">("list");
+  const [view, setView] = useState<"list" | "map" | "de">("list");
+  const [counts, setCounts] = useState<Record<string, number> | null>(null);
+  const [pins, setPins] = useState<{ lat: number; lng: number; name: string; detail?: string }[]>([]);
+  const [unmatched, setUnmatched] = useState<string[]>([]);
+  const [countsError, setCountsError] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [points, setPoints] = useState<{ key: string; name: string; tier: string | null; capacity: string; lat: number; lng: number }[]>([]);
   const [geocoding, setGeocoding] = useState(false);
 
@@ -223,6 +169,47 @@ const BehoerdeNetwork = () => {
     })();
     return () => { cancelled = true; };
   }, [isBehoerde, region, user, supabase]);
+
+  useEffect(() => {
+    if (view !== "de" || counts || !user) return;
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from("sentinel_applications")
+        .select("full_name, region, tier, pledge_data")
+        .eq("status", "approved")
+        .range(0, 999);
+      if (cancelled) return;
+      if (error || !data) { setCountsError(true); return; }
+      const rows = data as { full_name: string; region: string | null; tier: string | null; pledge_data: NetworkSentinel["pledge_data"] }[];
+      const map: Record<string, number> = {};
+      const raw = new Set<string>();
+      for (const row of rows) {
+        const r = (row.region ?? "").trim();
+        if (!r) continue;
+        const state = mapRegionToState(r);
+        if (state) map[state] = (map[state] ?? 0) + 1;
+        else raw.add(r);
+      }
+      setCounts(map);
+      setUnmatched([...raw].slice(0, 8));
+      // Pins auf City-Level (keine Hausadressen): eindeutige PLZ+Ort geokodieren.
+      setLocating(true);
+      const seen = new Map<string, [number, number]>();
+      const out: { lat: number; lng: number; name: string; detail?: string }[] = [];
+      for (const row of rows) {
+        const q = row.pledge_data?.questionnaire;
+        if (!q?.city) continue;
+        const key = `${q.zip ?? ""} ${q.city}`.trim();
+        if (!seen.has(key)) seen.set(key, await geocode(`${key}, Deutschland`));
+        if (cancelled) return;
+        const pos = seen.get(key);
+        if (pos) out.push({ lat: pos[0], lng: pos[1], name: row.full_name, detail: `${row.tier ?? "—"} · ${q.city}` });
+      }
+      if (!cancelled) { setPins(out); setLocating(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [view, counts, user, supabase]);
 
   useEffect(() => {
     if (view !== "map" || points.length > 0 || sentinels.length === 0) return;
@@ -290,8 +277,8 @@ const BehoerdeNetwork = () => {
           </div>
         </div>
 
-        <div className="mt-6 max-w-sm flex gap-px bg-border">
-          {([["list", "Liste", List], ["map", "Karte", MapIcon]] as const).map(([k, lbl, Icon]) => (
+        <div className="mt-6 max-w-xl flex gap-px bg-border">
+          {([["list", "Liste", List], ["map", "Karte", MapIcon], ["de", "Deutschland", Globe]] as const).map(([k, lbl, Icon]) => (
             <button
               key={k}
               onClick={() => setView(k)}
@@ -307,6 +294,31 @@ const BehoerdeNetwork = () => {
 
         {busy ? (
           <div className="mt-10 flex justify-center"><LoadingSnake label="Lade Sentinels" compact /></div>
+        ) : view === "de" ? (
+          <div className="mt-8 max-w-3xl">
+            {counts ? (
+              <>
+                <Suspense fallback={<div className="flex h-64 items-center justify-center border border-border text-xs text-muted-foreground">Lade Karte …</div>}>
+                  <GermanyMap values={counts} valueLabel="Freigegebene Sentinels" pins={pins} />
+                </Suspense>
+                <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Freigegebene Sentinels je Bundesland · Pins auf Ortsebene · Zoomen möglich
+                  {locating && <span className="mt-1 block normal-case tracking-normal">Orte werden bestimmt …</span>}
+                  {unmatched.length > 0 && (
+                    <span className="mt-1 block normal-case tracking-normal">Nicht zugeordnet: {unmatched.join(", ")}</span>
+                  )}
+                </p>
+              </>
+            ) : countsError ? (
+              <div className="border border-border bg-surface p-8 text-sm text-muted-foreground">
+                Bundesländer-Übersicht nicht verfügbar — dein Zugang ist auf {region} beschränkt.
+              </div>
+            ) : (
+              <div className="flex h-40 items-center justify-center border border-border text-xs text-muted-foreground">
+                Zähle Sentinels …
+              </div>
+            )}
+          </div>
         ) : sentinels.length === 0 ? (
           <div className="mt-10 border border-border bg-surface p-10 text-sm text-muted-foreground">
             Keine freigeschalteten Sentinels in {region}. Sobald Anwendungen in dieser Region freigegeben sind, erscheinen sie hier.
@@ -314,7 +326,13 @@ const BehoerdeNetwork = () => {
         ) : view === "map" ? (
           <div className="mt-8">
             {points.length > 0 ? (
-              <SentinelMap points={points} />
+              <>
+                <SentinelMap points={points} />
+                <p className="mt-2 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-primary" aria-hidden /> Sentinel</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-success" aria-hidden /> Stufe 4 · Experte</span>
+                </p>
+              </>
             ) : geocoding ? (
               <div className="flex h-40 items-center justify-center border border-border text-xs text-muted-foreground">
                 Bestimme Positionen …

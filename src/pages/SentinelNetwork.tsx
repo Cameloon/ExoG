@@ -1,13 +1,19 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { useAuth } from "@/hooks/useAuth";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, MapPin, Clock, CheckCircle2, XCircle } from "lucide-react";
+import { Building2, MapPin, Clock, CheckCircle2, XCircle, List, Map as MapIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LoadingSnake } from "@/components/ui/loading-snake";
+import { GlowMap } from "@/components/GlowMap";
+import { mapRegionToState } from "@/lib/regionMap";
+import { geocode } from "@/lib/geocode";
+
+// bklit/visx (~180 kB) nur laden, wenn die Kartenansicht geöffnet wird.
+const GermanyMap = lazy(() => import("@/components/GermanyMap").then((m) => ({ default: m.GermanyMap })));
 import { fetchShelters, fetchMyRequests, sendShelterRequest } from "@/lib/shelters";
 import type { Shelter, ShelterRequest } from "@/lib/types";
 
@@ -19,6 +25,28 @@ const SentinelNetwork = () => {
   const [requests, setRequests] = useState<ShelterRequest[]>([]);
   const [busy, setBusy] = useState(true);
   const [applying, setApplying] = useState<string | null>(null);
+  const [view, setView] = useState<"list" | "map">("list");
+  // Fallback-Positionen für Einrichtungen ohne Koordinaten (Adresse → Photon).
+  const [fallbackPins, setFallbackPins] = useState<{ id: string; lat: number; lng: number; label: string }[]>([]);
+  const [locating, setLocating] = useState(false);
+
+  useEffect(() => {
+    if (view !== "map" || shelters.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const missing = shelters.filter((s) => (s.lat == null || s.lng == null) && (s.address || s.region));
+      if (missing.length === 0) return;
+      setLocating(true);
+      const out: { id: string; lat: number; lng: number; label: string }[] = [];
+      for (const s of missing) {
+        const pos = await geocode(`${s.address ?? ""} ${s.region ?? ""}, Deutschland`);
+        if (cancelled) return;
+        if (pos) out.push({ id: s.id, lat: pos[0], lng: pos[1], label: s.address ?? s.region });
+      }
+      if (!cancelled) { setFallbackPins(out); setLocating(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [view, shelters]);
 
   const apply = async (shelterId: string) => {
     if (!user) return;
@@ -90,6 +118,52 @@ const SentinelNetwork = () => {
     : s === "declined" ? <XCircle className="h-4 w-4 text-destructive" />
     : <Clock className="h-4 w-4 text-primary" />;
 
+  const positioned = useMemo(
+    () => shelters.filter((s) => s.lat != null && s.lng != null),
+    [shelters],
+  );
+  const acceptedIds = useMemo(
+    () => new Set(requests.filter((r) => r.status === "accepted").map((r) => r.shelter_id)),
+    [requests],
+  );
+  const allPins = useMemo(
+    () =>     [
+      ...positioned.map((s) => ({
+        key: s.id,
+        name: s.name,
+        detail: `${s.region}${acceptedIds.has(s.id) ? " · akzeptiert" : ""}`,
+        href: `/shelters/${s.id}`,
+        linkLabel: "Profil",
+        lat: s.lat as number,
+        lng: s.lng as number,
+        tone: acceptedIds.has(s.id) ? ("success" as const) : ("info" as const),
+      })),
+      ...fallbackPins.map((p) => {
+        const s = shelters.find((x) => x.id === p.id);
+        const ok = s ? acceptedIds.has(s.id) : false;
+        return {
+          key: `${p.id}-ca`,
+          name: s?.name ?? p.label,
+          detail: `${s?.region ?? ""} · ca. Position${ok ? " · akzeptiert" : ""}`,
+          href: `/shelters/${p.id}`,
+          linkLabel: "Profil",
+          lat: p.lat,
+          lng: p.lng,
+          tone: ok ? ("success" as const) : ("info" as const),
+        };
+      }),
+    ],
+    [positioned, fallbackPins, acceptedIds, shelters],
+  );
+  const countsByRegion = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const s of shelters) {
+      const state = mapRegionToState(s.region ?? "");
+      if (state) map[state] = (map[state] ?? 0) + 1;
+    }
+    return map;
+  }, [shelters]);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <SiteHeader />
@@ -107,7 +181,51 @@ const SentinelNetwork = () => {
         ) : (
           <div className="mt-10 grid gap-10">
             <section>
-              <h2 className="font-display text-2xl flex items-center gap-2"><Building2 className="h-5 w-5 text-primary" /> Einrichtungen</h2>
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <h2 className="font-display text-2xl flex items-center gap-2"><Building2 className="h-5 w-5 text-primary" /> Einrichtungen</h2>
+                <div className="flex gap-px bg-border">
+                  {([["list", "Liste", List], ["map", "Karte", MapIcon]] as const).map(([k, lbl, Icon]) => (
+                    <button
+                      key={k}
+                      onClick={() => setView(k)}
+                      aria-pressed={view === k}
+                      className={`flex items-center gap-2 bg-surface px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
+                        view === k ? "bg-surface-elevated text-primary" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" /> {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {view === "map" && (
+                <div className="mt-4 grid gap-6">
+                  <div>
+                    <Suspense fallback={<div className="flex h-64 items-center justify-center border border-border text-xs text-muted-foreground">Lade Karte …</div>}>
+                      <GermanyMap
+                        values={countsByRegion}
+                        valueLabel="Einrichtungen"
+                        pins={allPins.map((p) => ({ lat: p.lat, lng: p.lng, name: p.name, detail: p.detail, tone: p.tone }))}
+                      />
+                    </Suspense>
+                    <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                      Einrichtungen je Bundesland · Zoomen möglich
+                      {locating && <span className="mt-1 block normal-case tracking-normal">Positionen werden bestimmt …</span>}
+                    </p>
+                  </div>
+                  {allPins.length > 0 ? (
+                    <div>
+                      <GlowMap points={allPins} />
+                      <p className="mt-2 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-info" aria-hidden /> Tierheim / Einrichtung — Klick für Profil</span>
+                        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-success" aria-hidden /> Akzeptiert</span>
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="border border-border bg-surface p-8 text-sm text-muted-foreground">Noch keine Einrichtung mit Position erfasst — Bewerbung unten über die Liste.</p>
+                  )}
+                </div>
+              )}
               {shelters.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">Noch keine Einrichtungen erfasst.</p>
               ) : (

@@ -5,12 +5,15 @@ import {
   BadgeCheck,
   Building2,
   Check,
+  Compass,
   Eye,
   FileSignature,
   HeartHandshake,
+  Hourglass,
   Microscope,
   Network,
   Repeat,
+  ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -560,9 +563,81 @@ export const LandingV2 = () => {
           </Wire>
         </section>
 
+        {/* ── SENTINELS (Original-Layout, v2-Stil) ── */}
+        <section id="sentinel" className="border-y border-border bg-card">
+          <div className="container grid gap-12 py-20 lg:grid-cols-12 lg:py-28">
+            <div className="lg:col-span-5">
+              <p className="font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground">§ Sentinels_</p>
+              <h2 className="mt-4 text-4xl font-bold leading-[1.05] tracking-tight md:text-6xl">
+                Du hast die <span className="v2a">Erfahrung.</span>
+                <br />
+                Wir geben ihr eine Aufgabe.
+              </h2>
+              <p className="mt-6 leading-relaxed text-muted-foreground">
+                Erfahrene Halter:innen wissen mehr über Reptilien und Wirbellose
+                als die meisten Tierärzt:innen. Dieses Wissen ist selten — und es
+                wird gebraucht. Nicht für die nächste Anschaffung. Für die Tiere,
+                die jetzt schon da sind und niemanden haben.
+              </p>
+              <blockquote className="mt-8 border-l-2 border-[hsl(var(--v2a))] pl-6">
+                <p className="text-2xl font-medium italic leading-snug md:text-3xl">
+                  „Das Ziel ist nicht, bessere Halter zu schaffen — sondern die
+                  letzte Generation, die noch Halter sein muss."
+                </p>
+                <footer className="mt-3 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">— Leitsatz BioSteward</footer>
+              </blockquote>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Button asChild><Link to="/sentinel">Sentinel-Pfad starten</Link></Button>
+                <Button asChild variant="outline"><Link to="/werte">Werte & FAQ</Link></Button>
+                <Button asChild variant="ghost"><Link to="/pledge">Pledge ansehen</Link></Button>
+              </div>
+            </div>
+            <div className="lg:col-span-7">
+              <Wire fig="Fig. 06 — Sentinels" meta="4 Pfeiler · Pledge">
+                <div className="grid gap-px border border-border bg-border sm:grid-cols-2">
+                  {[
+                    { icon: Compass, title: "Vom Halter zum Sentinel", body: "Du gibst dein Wissen nicht auf — du richtest es neu aus. Statt zu sammeln, fängst du auf. Statt zu besitzen, begleitest du." },
+                    { icon: Hourglass, title: "Pflege ist temporär", body: "Jedes Tier in deiner Obhut hat ein Ziel und einen Zeithorizont. Pflege ist eine Brücke — kein Dauerzustand." },
+                    { icon: HeartHandshake, title: "Verantwortung statt Eigentum", body: "Die Tiere existieren bereits in menschlicher Obhut. Wegsehen hilft ihnen nicht. Kompetente, befristete Pflege schon." },
+                    { icon: ShieldCheck, title: "Kein Markt, kein Status", body: "Sentinels handeln nicht. Keine Käufe, keine Zucht, keine Sammlung. Nur Aufnahme, Stabilisierung, Vermittlung." },
+                  ].map((p) => (
+                    <article key={p.title} className="bg-card p-6">
+                      <div className="flex items-center justify-between">
+                        <p.icon className="h-5 w-5 v2a" aria-hidden />
+                        <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Pfeiler</span>
+                      </div>
+                      <h3 className="mt-5 text-xl font-bold leading-tight">{p.title}</h3>
+                      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{p.body}</p>
+                    </article>
+                  ))}
+                </div>
+                <div className="mt-4 border border-border bg-card p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-4">
+                    <span className="font-mono text-[10px] uppercase tracking-[0.22em] v2a">Sentinel-Selbstverpflichtung</span>
+                    <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Privat · Reversibel · Jährlich</span>
+                  </div>
+                  <ul className="mt-5 space-y-3 text-sm text-muted-foreground">
+                    {[
+                      "Ich erwerbe keine neuen Tiere — außer für Notfall- oder Pflegeplatzierungen.",
+                      "Ich akzeptiere, dass Pflege temporär sein soll, sofern nichts anderes begründet ist.",
+                      "Ich stelle das Wohl des Tieres über mein persönliches Interesse.",
+                      "Ich dokumentiere Verläufe transparent — auch unangenehme Ausgänge.",
+                    ].map((line) => (
+                      <li key={line} className="flex gap-3">
+                        <span className="mt-2 h-px w-4 shrink-0 bg-[hsl(var(--v2a))]" aria-hidden />
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </Wire>
+            </div>
+          </div>
+        </section>
+
         {/* ── PLEDGE + STIMMEN ── */}
-        <section className="border-y border-border bg-card">
-          <div className="container grid gap-12 py-20 lg:grid-cols-12 lg:py-24">
+        <section className="container py-20 lg:py-28">
+          <div className="grid gap-12 lg:grid-cols-12">
             <div className="lg:col-span-5">
               <p className="font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground">Die Pledge_</p>
               <h2 className="mt-4 text-3xl font-bold tracking-tight md:text-4xl">Sechs Sätze. Eine Haltung.</h2>
@@ -580,7 +655,7 @@ export const LandingV2 = () => {
               <p className="font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground">Feel the love_</p>
               <h2 className="mt-4 text-3xl font-bold tracking-tight md:text-4xl">Stimmen aus dem Pilot.</h2>
               <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground">What people are saying</p>
-              <Wire fig="Fig. 06 — Stimmen" meta="3 Pilot-Stimmen" className="mt-8">
+              <Wire fig="Fig. 07 — Stimmen" meta="3 Pilot-Stimmen" className="mt-8">
               <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
                 {[
                   ["Sentinel, 15 J.", "@exhalter_sued", "EH", "Früher Sammlung, heute Notfall-Boxen — zum ersten Mal gibt mein Hobby etwas zurück."],
