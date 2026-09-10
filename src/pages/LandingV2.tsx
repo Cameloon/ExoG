@@ -1,10 +1,11 @@
-import { Fragment, lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { Fragment, lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight,
   BadgeCheck,
   Building2,
   Check,
+  ChevronDown,
   Compass,
   Eye,
   FileSignature,
@@ -20,6 +21,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import heroImg from "@/assets/hero-evidence.jpg";
 import { Button } from "@/components/ui/button";
+import { V2_CSS } from "@/lib/v2Theme";
 
 // ponytail: bklit-flavored lab page. bklit OKLCH tokens → HSL scope below
 // (light + dark, page-local — global theme untouched). Mono+stone,
@@ -28,115 +30,64 @@ import { Button } from "@/components/ui/button";
 // three.js PixelBlast (~600KB) is decorative — same idle-defer as the original.
 const PixelBlast = lazy(() => import("@/components/backgrounds/PixelBlast"));
 
-const V2_CSS = `
-.v2scope{
-  --background:68 0% 96%; --foreground:200 14% 4%;
-  --card:63 100% 100%; --card-foreground:200 14% 4%;
-  --popover:63 100% 100%; --popover-foreground:200 14% 4%;
-  --primary:69 0% 24%; --primary-foreground:150 0% 93%;
-  --secondary:240 18% 98%; --secondary-foreground:240 6% 10%;
-  --muted:68 0% 92%; --muted-foreground:120 0% 46%;
-  --accent:60 0% 92%; --accent-foreground:223 38% 15%;
-  --border:68 0% 90%; --input:69 0% 95%; --ring:0 0% 0%;
-  --radius:0rem;
-  --success:152 55% 30%;
-  --v2a:45 93% 47%; --v2ai:25 90% 36%;
-  /* bklit chart tokens (stone scale, light) — dieselbe Art, Akzente zu setzen */
-  --chart-1:30 6% 25%; --chart-2:25 5% 45%; --chart-3:24 3% 65%;
-  --chart-4:24 6% 84%; --chart-5:60 5% 96%;
-  background:hsl(var(--background)); color:hsl(var(--foreground));
-}
-html.dark .v2scope{
-  --background:221 15% 4%; --foreground:180 20% 98%;
-  --card:225 12% 6%; --card-foreground:180 20% 98%;
-  --popover:227 12% 12%; --popover-foreground:180 20% 98%;
-  --primary:192 11% 90%; --primary-foreground:197 13% 10%;
-  --secondary:227 12% 15%; --secondary-foreground:180 20% 98%;
-  --muted:230 12% 19%; --muted-foreground:224 8% 54%;
-  --accent:229 12% 18%; --accent-foreground:180 20% 98%;
-  --border:224 12% 16%; --input:224 12% 16%; --ring:225 84% 60%;
-  --success:145 50% 45%;
-  --v2a:45 93% 47%; --v2ai:43 96% 60%;
-  /* bklit chart tokens (zinc scale, dark) */
-  --chart-1:240 4% 16%; --chart-2:240 5% 34%; --chart-3:240 4% 46%;
-  --chart-4:240 5% 65%; --chart-5:240 5% 84%;
-}
-.v2scope[data-acc="lila"]{ --v2a:239 84% 67%; --v2ai:243 75% 50%; }
-html.dark .v2scope[data-acc="lila"]{ --v2a:239 84% 67%; --v2ai:234 89% 74%; }
-/* Graphit = bklits Mono-Akzent, direkt aus den chart tokens */
-.v2scope[data-acc="mono"]{ --v2a:var(--chart-2); --v2ai:var(--chart-1); }
-html.dark .v2scope[data-acc="mono"]{ --v2a:var(--chart-4); --v2ai:var(--chart-5); }
-/* Forest = bklits Teal-Skala auf --chart-1…5, Akzent daraus abgeleitet */
-.v2scope[data-acc="forest"]{
-  --chart-1:176 69% 22%; --chart-2:175 84% 32%; --chart-3:173 80% 40%;
-  --chart-4:172 66% 50%; --chart-5:168 84% 78%;
-  --v2a:var(--chart-3); --v2ai:var(--chart-1);
-}
-html.dark .v2scope[data-acc="forest"]{
-  --chart-1:175 77% 26%; --chart-2:175 84% 32%; --chart-3:173 80% 40%;
-  --chart-4:172 66% 50%; --chart-5:171 77% 64%;
-  --v2a:var(--chart-3); --v2ai:var(--chart-4);
-}
-/* Lagoon = bklits Cyan-Skala, gleiche Mechanik */
-.v2scope[data-acc="lagoon"]{
-  --chart-1:194 70% 27%; --chart-2:192 91% 36%; --chart-3:189 94% 43%;
-  --chart-4:188 86% 53%; --chart-5:186 94% 82%;
-  --v2a:var(--chart-3); --v2ai:var(--chart-1);
-}
-html.dark .v2scope[data-acc="lagoon"]{
-  --chart-1:193 82% 31%; --chart-2:192 91% 36%; --chart-3:189 94% 43%;
-  --chart-4:188 86% 53%; --chart-5:187 92% 69%;
-  --v2a:var(--chart-3); --v2ai:var(--chart-4);
-}
-.v2a{ color:hsl(var(--v2ai)); }
-.v2ab{ background-color:hsl(var(--v2a)); }
-.v2aglow{ background-color:hsl(var(--v2a) / .15); }
-.v2scope ::selection{ background:hsl(var(--v2a)); color:#fff; }
-.v2dots{
-  background-image:radial-gradient(circle at 1px 1px, currentColor 1px, transparent 0);
-  background-size:22px 22px;
-}
-.v2caret{ animation:v2blink 1.06s step-end infinite; }
-@keyframes v2blink{ 0%,100%{opacity:1} 50%{opacity:0} }
-@media (prefers-reduced-motion: reduce){ .v2caret{ animation:none } }
-.v2node{ border:1px solid hsl(var(--border)); background:hsl(var(--card)); }
-.v2node-on{
-  border-color:hsl(var(--v2a));
-  background:hsl(var(--background));
-  box-shadow:0 0 0 1px hsl(var(--v2a) / .45), 0 0 28px -8px hsl(var(--v2a) / .55);
-}
-.v2edge{ position:relative; display:block; background:hsl(var(--border)); }
-.v2edge > span{ position:absolute; inset:0; display:block; background:hsl(var(--v2a)); transform:scaleX(0); transform-origin:left center; }
-.v2edge-done > span{ transform:none; }
-/* Loading-Bar: Dauer muss zu STEP_MS unten passen */
-.v2edge-run > span{ animation:v2load 3.6s linear forwards; }
-@keyframes v2load{ from{ transform:scaleX(0); } to{ transform:scaleX(1); } }
-.v2paused .v2edge-run > span{ animation-play-state:paused; }
-@media (max-width:1023.5px){
-  .v2edge > span{ transform:scaleY(0); transform-origin:center top; }
-  .v2edge-run > span{ animation-name:v2loadY; }
-  @keyframes v2loadY{ from{ transform:scaleY(0); } to{ transform:scaleY(1); } }
-}
-@media (prefers-reduced-motion: reduce){ .v2edge-run > span{ animation:none } }
-html:not(.dark) .v2scope .v2fx{ opacity:.45; filter:saturate(.8) brightness(1.05); }
-`;
+
 
 type FlowStep = { n: string; title: string; time: string; body: string; icon?: LucideIcon };
 
-// bklit-style Wireframe: Dot-Canvas, Eck-Kreuze, Fig-Leiste.
-const Wire = ({ fig, meta, children, className = "" }: { fig: string; meta: string; children: ReactNode; className?: string }) => (
-  <div className={`relative border border-border bg-background ${className}`}>
-    <div className="v2dots pointer-events-none absolute inset-0 text-foreground opacity-[0.05]" aria-hidden />
-    {(["-left-[7px] -top-[12px]", "-right-[7px] -top-[12px]", "-left-[7px] -bottom-[12px]", "-right-[7px] -bottom-[12px]"] as const).map((pos) => (
-      <span key={pos} aria-hidden className={`absolute ${pos} z-10 bg-background px-0.5 font-mono text-sm leading-none text-muted-foreground`}>+</span>
+// bklit framed grid (gem-portfolio-2 /reference): section rulers + corner
+// hatches around the frame; dots punched on the grid intersections.
+const RULER_CORNERS = ["tl", "tr", "bl", "br"] as const;
+
+const Wire = ({ children, hatch = "both", className = "" }: { children: ReactNode; hatch?: "both" | "bl" | "none"; className?: string }) => (
+  <div className={`v2wire ${className}`}>
+    {RULER_CORNERS.map((c) => (
+      <Fragment key={c}>
+        <i aria-hidden className={`v2rule v2rule-${c}-v`} />
+        <i aria-hidden className={`v2rule v2rule-${c}-h`} />
+      </Fragment>
     ))}
-    <div className="relative flex items-center justify-between gap-4 border-b border-border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-      <span>{fig}</span>
-      <span>{meta}</span>
-    </div>
-    <div className="relative p-4 md:p-6">{children}</div>
+    {hatch === "both" && <i aria-hidden className="v2hatch v2hatch-tr" />}
+    {hatch !== "none" && <i aria-hidden className="v2hatch v2hatch-bl" />}
+    {children}
   </div>
 );
+
+// bklit GridDots: markers centered on every grid intersection (cols×rows
+// cells). `square` renders the smaller gray-filled squares (Rechtsrahmen);
+// `anchor="bottom"` renders a single dot row on the parent's bottom border;
+// `omitCenterBottom` drops only the center-column marker on the bottom line
+// (Sentinels: the single dot one level beneath the grid center).
+const GridDots = ({ cols, rows = 0, square = false, anchor = "full", omitCenterBottom = false, className = "" }: { cols: number; rows?: number; square?: boolean; anchor?: "full" | "bottom"; omitCenterBottom?: boolean; className?: string }) => {
+  const at = (i: number, n: number) => `calc(5px + ${i / n} * (100% - 10px))`;
+  if (anchor === "bottom") {
+    return (
+      <div aria-hidden className={`v2dotrow ${className}`}>
+        {Array.from({ length: cols + 1 }, (_, c) => {
+          if (omitCenterBottom && cols % 2 === 0 && c === cols / 2) return null;
+          return <i key={c} className={square ? "v2gridsq" : "v2griddot"} style={{ left: at(c, cols), top: "50%" }} />;
+        })}
+      </div>
+    );
+  }
+  const lines = rows + 1;
+  const markers: { c: number; r: number }[] = [];
+  for (let r = 0; r < lines; r++) {
+    for (let c = 0; c <= cols; c++) {
+      markers.push({ c, r });
+    }
+  }
+  return (
+    <div aria-hidden className={`v2griddots ${className}`}>
+      {markers.map(({ c, r }) => (
+        <i
+          key={`${c}-${r}`}
+          className={square ? "v2gridsq" : "v2griddot"}
+          style={{ left: at(c, cols), top: at(r, rows) }}
+        />
+      ))}
+    </div>
+  );
+};
 
 // Muss zur .v2edge-run Animationsdauer im CSS oben passen.
 const STEP_MS = 3600;
@@ -217,13 +168,32 @@ export const LandingV2 = () => {
     setStep(0);
   }, [audience]);
 
+  // Ablauf-Timeline: Auto-Run erst starten, wenn die Sektion wirklich im
+  // Viewport ist (und anhalten, sobald sie wieder raus scrollt).
+  const ablaufRef = useRef<HTMLElement | null>(null);
+  const [ablaufInView, setAblaufInView] = useState(false);
+
+  useEffect(() => {
+    const el = ablaufRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setAblaufInView(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      ([entry]) => setAblaufInView(entry.isIntersecting),
+      { threshold: 0.3 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
   // n8n-style auto-run: Nodes zünden nach und nach, Hover pausiert.
   useEffect(() => {
-    if (paused) return;
+    if (!ablaufInView || paused) return;
     if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     const id = setInterval(() => setStep((s) => (s + 1) % flow.length), STEP_MS);
     return () => clearInterval(id);
-  }, [audience, paused, flow.length]);
+  }, [ablaufInView, audience, paused, flow.length]);
 
   useEffect(() => {
     try {
@@ -259,7 +229,7 @@ export const LandingV2 = () => {
   }, []);
 
   return (
-    <div className="v2scope min-h-screen font-sans antialiased" data-acc={acc}>
+    <div className="v2scope min-h-screen antialiased" data-acc={acc}>
       <style>{V2_CSS}</style>
       <SiteHeader />
 
@@ -286,6 +256,9 @@ export const LandingV2 = () => {
                 </button>
               ))}
             </div>
+            <Link to="/app-v2" className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              → App v2
+            </Link>
             <Link to="/" className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
               ← Original
             </Link>
@@ -439,7 +412,7 @@ export const LandingV2 = () => {
         </section>
 
         {/* ── ABLAUF mit Toggle ── */}
-        <section id="ablauf" className="relative border-y border-border bg-card">
+        <section id="ablauf" ref={ablaufRef} className="relative border-y border-border bg-card">
           <div className="v2dots pointer-events-none absolute inset-0 text-foreground opacity-[0.05]" aria-hidden />
           <div className="container relative py-20 lg:py-28">
             <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
@@ -544,8 +517,13 @@ export const LandingV2 = () => {
         <section className="container py-20 lg:py-28">
           <p className="font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground">Rechtsrahmen_</p>
           <h2 className="mt-4 max-w-3xl text-4xl font-bold tracking-tight md:text-5xl">Für deutsches Recht gebaut — ab Tag eins.</h2>
-          <Wire fig="Fig. 05 — Rechtsrahmen" meta="6 Module · DE" className="mt-10">
-          <div className="grid gap-px overflow-hidden   border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
+          <Wire className="mt-10">
+          <div className="relative">
+            {/* Dots je Breakpoint-Layout: 1×6 → 2×3 → 3×2 (Quadrat-Marker) */}
+            <GridDots cols={1} rows={6} square className="sm:hidden" />
+            <GridDots cols={2} rows={3} square className="hidden sm:block lg:hidden" />
+            <GridDots cols={3} rows={2} square className="hidden lg:block" />
+            <div className="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-3">
             {[
               ["CITES A/B/C", "Anhang A nur an Institutionen — privat systemseitig ausgeschlossen."],
               ["TierSchG §2/§11", "Sachkunde geprüft & versioniert, DGHT-Mindestanforderungen."],
@@ -559,6 +537,7 @@ export const LandingV2 = () => {
                 <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{d}</p>
               </div>
             ))}
+            </div>
           </div>
           </Wire>
         </section>
@@ -593,25 +572,33 @@ export const LandingV2 = () => {
               </div>
             </div>
             <div className="lg:col-span-7">
-              <Wire fig="Fig. 06 — Sentinels" meta="4 Pfeiler · Pledge">
-                <div className="grid gap-px border border-border bg-border sm:grid-cols-2">
-                  {[
-                    { icon: Compass, title: "Vom Halter zum Sentinel", body: "Du gibst dein Wissen nicht auf — du richtest es neu aus. Statt zu sammeln, fängst du auf. Statt zu besitzen, begleitest du." },
-                    { icon: Hourglass, title: "Pflege ist temporär", body: "Jedes Tier in deiner Obhut hat ein Ziel und einen Zeithorizont. Pflege ist eine Brücke — kein Dauerzustand." },
-                    { icon: HeartHandshake, title: "Verantwortung statt Eigentum", body: "Die Tiere existieren bereits in menschlicher Obhut. Wegsehen hilft ihnen nicht. Kompetente, befristete Pflege schon." },
-                    { icon: ShieldCheck, title: "Kein Markt, kein Status", body: "Sentinels handeln nicht. Keine Käufe, keine Zucht, keine Sammlung. Nur Aufnahme, Stabilisierung, Vermittlung." },
-                  ].map((p) => (
-                    <article key={p.title} className="bg-card p-6">
-                      <div className="flex items-center justify-between">
-                        <p.icon className="h-5 w-5 v2a" aria-hidden />
-                        <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Pfeiler</span>
-                      </div>
-                      <h3 className="mt-5 text-xl font-bold leading-tight">{p.title}</h3>
-                      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{p.body}</p>
-                    </article>
-                  ))}
+              <Wire hatch="none">
+                <div className="relative">
+                  {/* Dots je Breakpoint-Layout: 1×4 → 2×2, komplett */}
+                  <GridDots cols={1} rows={4} className="sm:hidden" />
+                  <GridDots cols={2} rows={2} className="hidden sm:block" />
+                  <div className="grid gap-px bg-border sm:grid-cols-2">
+                    {[
+                      { icon: Compass, title: "Vom Halter zum Sentinel", body: "Du gibst dein Wissen nicht auf — du richtest es neu aus. Statt zu sammeln, fängst du auf. Statt zu besitzen, begleitest du." },
+                      { icon: Hourglass, title: "Pflege ist temporär", body: "Jedes Tier in deiner Obhut hat ein Ziel und einen Zeithorizont. Pflege ist eine Brücke — kein Dauerzustand." },
+                      { icon: HeartHandshake, title: "Verantwortung statt Eigentum", body: "Die Tiere existieren bereits in menschlicher Obhut. Wegsehen hilft ihnen nicht. Kompetente, befristete Pflege schon." },
+                      { icon: ShieldCheck, title: "Kein Markt, kein Status", body: "Sentinels handeln nicht. Keine Käufe, keine Zucht, keine Sammlung. Nur Aufnahme, Stabilisierung, Vermittlung." },
+                    ].map((p) => (
+                      <article key={p.title} className="bg-card p-6">
+                        <div className="flex items-center justify-between">
+                          <p.icon className="h-5 w-5 v2a" aria-hidden />
+                          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Pfeiler</span>
+                        </div>
+                        <h3 className="mt-5 text-xl font-bold leading-tight">{p.title}</h3>
+                        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{p.body}</p>
+                      </article>
+                    ))}
+                  </div>
                 </div>
-                <div className="mt-4 border border-border bg-card p-6">
+                <div className="relative border-t border-border bg-card p-6">
+                  {/* Grid-Border-Dots auf der Frame-Unterkante — ohne den mittleren Marker */}
+                  <GridDots cols={1} anchor="bottom" omitCenterBottom className="sm:hidden" />
+                  <GridDots cols={2} anchor="bottom" omitCenterBottom className="hidden sm:block" />
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-4">
                     <span className="font-mono text-[10px] uppercase tracking-[0.22em] v2a">Sentinel-Selbstverpflichtung</span>
                     <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Privat · Reversibel · Jährlich</span>
@@ -655,14 +642,18 @@ export const LandingV2 = () => {
               <p className="font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground">Feel the love_</p>
               <h2 className="mt-4 text-3xl font-bold tracking-tight md:text-4xl">Stimmen aus dem Pilot.</h2>
               <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground">What people are saying</p>
-              <Wire fig="Fig. 07 — Stimmen" meta="3 Pilot-Stimmen" className="mt-8">
-              <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+              {/* About-„expertise-card"-Muster: Rahmenlinie + 13px-Reticle exakt auf den Ecken */}
+              <div className="mt-8 grid gap-[14px] md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
                 {[
                   ["Sentinel, 15 J.", "@exhalter_sued", "EH", "Früher Sammlung, heute Notfall-Boxen — zum ersten Mal gibt mein Hobby etwas zurück."],
                   ["Veterinäramt", "@vetamt_pilot", "VA", "Eine Akte, die vor Gericht nicht auseinanderfällt. Übergabe in zwei Minuten dokumentiert."],
                   ["Sentinel #214", "@sentinel_214", "S+", "Strenge Verifikation — genau deshalb bin ich geblieben. Hier zählt Können, nicht Besitz."],
                 ].map(([who, handle, initials, quote]) => (
-                  <figure key={who} className="  flex flex-col border border-border bg-background p-5">
+                  <figure key={who} className="v2cross flex flex-col p-5">
+                    <span className="v2ret tl" aria-hidden />
+                    <span className="v2ret tr" aria-hidden />
+                    <span className="v2ret bl" aria-hidden />
+                    <span className="v2ret br" aria-hidden />
                     <div className="flex items-center gap-3">
                       <span aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center bg-muted font-mono text-xs font-bold">{initials}</span>
                       <span className="min-w-0">
@@ -680,7 +671,6 @@ export const LandingV2 = () => {
                   </figure>
                 ))}
               </div>
-              </Wire>
             </div>
           </div>
         </section>
@@ -692,9 +682,13 @@ export const LandingV2 = () => {
             <h2 className="mt-4 text-center text-3xl font-bold tracking-tight md:text-5xl">Frag, was alle fragen.</h2>
             <div className="mt-10 space-y-3">
               {FAQS.map((f) => (
-                <details key={f.q} className="  border border-border bg-card px-6 py-4">
-                  <summary className="cursor-pointer list-none text-[15px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                <details key={f.q} className="group border border-border bg-card px-6 py-4">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-[15px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                     {f.q}
+                    <ChevronDown
+                      className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180"
+                      aria-hidden
+                    />
                   </summary>
                   <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{f.a}</p>
                 </details>

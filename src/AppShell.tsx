@@ -24,10 +24,11 @@ const ShelterProfile = lazy(() => import("./pages/ShelterProfile.tsx"));
 const SentinelNetwork = lazy(() => import("./pages/SentinelNetwork.tsx"));
 const Account = lazy(() => import("./pages/Account.tsx"));
 const Care = lazy(() => import("./pages/Care.tsx"));
+const AppV2Layout = lazy(() => import("./pages/appv2/AppV2Layout.tsx"));
 
 const RouteFallback = () => <PageLoader label="Lade Seite" />;
 
-const RequireAdmin = ({ children }: { children: React.ReactNode }) => {
+export const RequireAdmin = ({ children }: { children: React.ReactNode }) => {
   const { user, isAdmin, loading } = useAuth();
 
   if (loading) {
@@ -38,7 +39,7 @@ const RequireAdmin = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
-const RequireAuth = ({ children }: { children: React.ReactNode }) => {
+export const RequireAuth = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAuth();
   if (loading) {
     return <PageLoader label="Prüfe Zugang" />;
@@ -61,12 +62,13 @@ const DashboardHome = () => {
   return <Navigate to={home[role] ?? "/sentinel"} replace />;
 };
 
-const AppShell = () => (
+const AppShellRoot = () => (
   <ClerkProvider publishableKey={EXTERNAL_CONFIG.CLERK_PUBLISHABLE_KEY}>
     <AuthProvider>
       <div id="main" tabIndex={-1}>
         <Suspense fallback={<RouteFallback />}>
           <Routes>
+            <Route path="/app-v2/*" element={<AppV2Layout />} />
             <Route path="/dashboard" element={<DashboardHome />} />
             <Route path="/demo" element={<Dashboard />} />
             <Route path="/care" element={<RequireAuth><Care /></RequireAuth>} />
@@ -91,4 +93,4 @@ const AppShell = () => (
   </ClerkProvider>
 );
 
-export default AppShell;
+export default AppShellRoot;
