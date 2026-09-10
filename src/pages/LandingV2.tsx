@@ -22,6 +22,7 @@ import { SiteFooter } from "@/components/SiteFooter";
 import heroImg from "@/assets/hero-evidence.jpg";
 import { Button } from "@/components/ui/button";
 import { V2_CSS } from "@/lib/v2Theme";
+import { useAccentTheme } from "@/hooks/useAccentTheme";
 
 // ponytail: bklit-flavored lab page. bklit OKLCH tokens → HSL scope below
 // (light + dark, page-local — global theme untouched). Mono+stone,
@@ -148,14 +149,7 @@ export const LandingV2 = () => {
   const [audience, setAudience] = useState<"beh" | "sen">("sen");
   const [step, setStep] = useState(0);
   const [paused, setPaused] = useState(false);
-  const [acc, setAcc] = useState<"orange" | "lila" | "mono" | "forest" | "lagoon">(() => {
-    try {
-      const v = localStorage.getItem("v2.acc");
-      return v === "lila" || v === "mono" || v === "forest" || v === "lagoon" ? v : "orange";
-    } catch {
-      return "orange";
-    }
-  });
+  const { accent: acc, setAccent: setAcc } = useAccentTheme();
   const [showFx, setShowFx] = useState(false);
   const [isDark, setIsDark] = useState(() =>
     typeof document !== "undefined" ? document.documentElement.classList.contains("dark") : true,
@@ -194,14 +188,6 @@ export const LandingV2 = () => {
     const id = setInterval(() => setStep((s) => (s + 1) % flow.length), STEP_MS);
     return () => clearInterval(id);
   }, [ablaufInView, audience, paused, flow.length]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("v2.acc", acc);
-    } catch {
-      /* ignore */
-    }
-  }, [acc]);
 
   // Theme für PixelBlast-Größe beobachten (hell braucht gröbere Pixel).
   useEffect(() => {

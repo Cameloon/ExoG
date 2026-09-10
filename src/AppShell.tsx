@@ -1,13 +1,14 @@
 // Auth-gated shell. Imported lazily from App.tsx so the ~90 kB gz Clerk
 // runtime is only fetched when a visitor actually hits an auth route —
 // public landing pages render without it.
-import { Suspense, lazy, useState } from "react";
+import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ClerkProvider } from "@clerk/clerk-react";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { EXTERNAL_CONFIG } from "@/config/external";
 import { PageLoader } from "@/components/ui/loading-snake";
 import { V2_CSS } from "@/lib/v2Theme";
+import { useAccentTheme } from "@/hooks/useAccentTheme";
 
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const SentinelPath = lazy(() => import("./pages/SentinelPath.tsx"));
@@ -64,17 +65,10 @@ const DashboardHome = () => {
 };
 
 const AppShellRoot = () => {
-  const [acc] = useState<"orange" | "lila" | "mono" | "forest" | "lagoon">(() => {
-    try {
-      const value = localStorage.getItem("v2.acc");
-      return value === "lila" || value === "mono" || value === "forest" || value === "lagoon" ? value : "orange";
-    } catch {
-      return "orange";
-    }
-  });
+  const { accent: acc } = useAccentTheme();
 
   return (
-    <div className="v2scope min-h-screen antialiased" data-acc={acc}>
+    <div className="v2scope min-h-screen antialiased" data-acc={acc} data-app-v2>
       <style>{V2_CSS}</style>
       <ClerkProvider publishableKey={EXTERNAL_CONFIG.CLERK_PUBLISHABLE_KEY}>
         <AuthProvider>

@@ -6,6 +6,7 @@ import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { EXTERNAL_CONFIG } from "@/config/external";
 import { SentinelChangePanel } from "@/components/dashboard/SentinelChangePanel";
+import { AccentThemeSelector } from "@/components/AccentThemeSelector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -103,6 +104,18 @@ const Account = () => {
             <Button variant="outline" disabled={savingName} onClick={saveName}>
               {savingName ? "…" : "Speichern"}
             </Button>
+          </div>
+        </div>
+
+        <div className="mt-10 border border-border rounded-md p-6">
+          <h2 className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
+            Erscheinungsbild
+          </h2>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Wähle die Akzentfarbe für Landingpage, Navigation und App-Oberfläche.
+          </p>
+          <div className="mt-4">
+            <AccentThemeSelector />
           </div>
         </div>
 

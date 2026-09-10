@@ -62,6 +62,14 @@ html.dark .v2scope[data-acc="lagoon"]{
   --chart-4:188 86% 53%; --chart-5:187 92% 69%;
   --v2a:var(--chart-3); --v2ai:var(--chart-4);
 }
+/* App skin: primary actions follow the selected accent throughout the product. */
+.v2scope[data-app-v2]{
+  --primary:var(--v2a);
+  --primary-foreground:200 14% 4%;
+  --ring:var(--v2a);
+  --accent:var(--v2a);
+  --accent-foreground:200 14% 4%;
+}
 .v2a{ color:hsl(var(--v2ai)); }
 .v2ab{ background-color:hsl(var(--v2a)); }
 .v2aglow{ background-color:hsl(var(--v2a) / .15); }

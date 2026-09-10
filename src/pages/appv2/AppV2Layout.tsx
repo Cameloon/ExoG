@@ -5,6 +5,7 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { PageLoader } from "@/components/ui/loading-snake";
 import { RequireAdmin, RequireAuth } from "@/AppShell";
 import { useAuth } from "@/hooks/useAuth";
+import { useAccentTheme } from "@/hooks/useAccentTheme";
 import { V2_CSS } from "@/lib/v2Theme";
 
 // ponytail: /app-v2 = exakt dieselben App-Seiten und -Daten, aber im
@@ -46,18 +47,10 @@ const RoleHome = () => {
 };
 
 export const AppV2Layout = () => {
-  // Akzent folgt der Wahl auf /v2 (localStorage), initial gelesen.
-  const acc = (() => {
-    try {
-      const v = localStorage.getItem("v2.acc");
-      return v === "lila" || v === "mono" || v === "forest" || v === "lagoon" ? v : "orange";
-    } catch {
-      return "orange";
-    }
-  })();
+  const { accent: acc } = useAccentTheme();
 
   return (
-    <div className="v2scope min-h-screen antialiased" data-acc={acc}>
+    <div className="v2scope min-h-screen antialiased" data-acc={acc} data-app-v2>
       <style>{V2_CSS}</style>
       <SiteHeader />
       <div className="border-b border-border">
