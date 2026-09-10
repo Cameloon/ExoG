@@ -8,7 +8,8 @@ import { isConfigured } from "@/config/external";
 import { PageLoader } from "@/components/ui/loading-snake";
 import "@/i18n";
 
-// Route-level code splitting: everything except the landing page loads on demand.
+// Route-level code splitting: public landing variants stay separate from the
+// auth shell; the v2 design is now the canonical landing page.
 // AppShell (Clerk + Supabase, ~90 kB gz) is its own lazy chunk — public pages
 // never fetch the auth runtime.
 const Landing = lazy(() => import("./pages/Index.tsx").then((m) => ({ default: m.Landing })));
@@ -50,8 +51,9 @@ const App = () => {
         <BrowserRouter>
           <Suspense fallback={<RouteFallback />}>
             <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route path="/start" element={<Landing />} />
+              <Route path="/" element={<LandingV2 />} />
+              <Route path="/start" element={<LandingV2 />} />
+              <Route path="/original" element={<Landing />} />
               <Route path="/v2" element={<LandingV2 />} />
               <Route path="/werte" element={<Werte />} />
               <Route path="/impressum" element={<Impressum />} />

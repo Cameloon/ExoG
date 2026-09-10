@@ -1,12 +1,13 @@
 // Auth-gated shell. Imported lazily from App.tsx so the ~90 kB gz Clerk
 // runtime is only fetched when a visitor actually hits an auth route —
 // public landing pages render without it.
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ClerkProvider } from "@clerk/clerk-react";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { EXTERNAL_CONFIG } from "@/config/external";
 import { PageLoader } from "@/components/ui/loading-snake";
+import { V2_CSS } from "@/lib/v2Theme";
 
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const SentinelPath = lazy(() => import("./pages/SentinelPath.tsx"));
@@ -62,35 +63,49 @@ const DashboardHome = () => {
   return <Navigate to={home[role] ?? "/sentinel"} replace />;
 };
 
-const AppShellRoot = () => (
-  <ClerkProvider publishableKey={EXTERNAL_CONFIG.CLERK_PUBLISHABLE_KEY}>
-    <AuthProvider>
-      <div id="main" tabIndex={-1}>
-        <Suspense fallback={<RouteFallback />}>
-          <Routes>
-            <Route path="/app-v2/*" element={<AppV2Layout />} />
-            <Route path="/dashboard" element={<DashboardHome />} />
-            <Route path="/demo" element={<Dashboard />} />
-            <Route path="/care" element={<RequireAuth><Care /></RequireAuth>} />
-            <Route path="/sentinel" element={<SentinelPath />} />
-            <Route path="/pledge" element={<Pledge />} />
-            <Route path="/sentinel/apply" element={<RequireAuth><SentinelApply /></RequireAuth>} />
-            <Route path="/wards" element={<RequireAuth><Wards /></RequireAuth>} />
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/behoerde" element={<RequireAuth><Behoerde /></RequireAuth>} />
-            <Route path="/behoerde/network" element={<RequireAuth><BehoerdeNetwork /></RequireAuth>} />
-            <Route path="/behoerde/verwaltung" element={<RequireAuth><BehoerdeVerwaltung /></RequireAuth>} />
-            <Route path="/shelters" element={<RequireAuth><Shelters /></RequireAuth>} />
-            <Route path="/shelters/:id" element={<RequireAuth><ShelterProfile /></RequireAuth>} />
-            <Route path="/sentinel/network" element={<RequireAuth><SentinelNetwork /></RequireAuth>} />
-            <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
-            <Route path="/account" element={<RequireAuth><Account /></RequireAuth>} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
-      </div>
-    </AuthProvider>
-  </ClerkProvider>
-);
+const AppShellRoot = () => {
+  const [acc] = useState<"orange" | "lila" | "mono" | "forest" | "lagoon">(() => {
+    try {
+      const value = localStorage.getItem("v2.acc");
+      return value === "lila" || value === "mono" || value === "forest" || value === "lagoon" ? value : "orange";
+    } catch {
+      return "orange";
+    }
+  });
+
+  return (
+    <div className="v2scope min-h-screen antialiased" data-acc={acc}>
+      <style>{V2_CSS}</style>
+      <ClerkProvider publishableKey={EXTERNAL_CONFIG.CLERK_PUBLISHABLE_KEY}>
+        <AuthProvider>
+          <div id="main" tabIndex={-1}>
+            <Suspense fallback={<RouteFallback />}>
+              <Routes>
+                <Route path="/app-v2/*" element={<AppV2Layout />} />
+                <Route path="/dashboard" element={<DashboardHome />} />
+                <Route path="/demo" element={<Dashboard />} />
+                <Route path="/care" element={<RequireAuth><Care /></RequireAuth>} />
+                <Route path="/sentinel" element={<SentinelPath />} />
+                <Route path="/pledge" element={<Pledge />} />
+                <Route path="/sentinel/apply" element={<RequireAuth><SentinelApply /></RequireAuth>} />
+                <Route path="/wards" element={<RequireAuth><Wards /></RequireAuth>} />
+                <Route path="/auth" element={<Auth />} />
+                <Route path="/behoerde" element={<RequireAuth><Behoerde /></RequireAuth>} />
+                <Route path="/behoerde/network" element={<RequireAuth><BehoerdeNetwork /></RequireAuth>} />
+                <Route path="/behoerde/verwaltung" element={<RequireAuth><BehoerdeVerwaltung /></RequireAuth>} />
+                <Route path="/shelters" element={<RequireAuth><Shelters /></RequireAuth>} />
+                <Route path="/shelters/:id" element={<RequireAuth><ShelterProfile /></RequireAuth>} />
+                <Route path="/sentinel/network" element={<RequireAuth><SentinelNetwork /></RequireAuth>} />
+                <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
+                <Route path="/account" element={<RequireAuth><Account /></RequireAuth>} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
+          </div>
+        </AuthProvider>
+      </ClerkProvider>
+    </div>
+  );
+};
 
 export default AppShellRoot;
