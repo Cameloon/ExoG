@@ -259,6 +259,12 @@ export const GermanyMap = ({ values, valueLabel = "Sentinels", pins = [] }: { va
               </g>
             )}
             {pins.map((p, i) => {
+              // Ungültige/ausserhalb Deutschlands liegende Koordinaten würden
+              // als unsichtbares NaN oder außerhalb der ViewBox landen.
+              if (
+                !Number.isFinite(p.lat) || !Number.isFinite(p.lng) ||
+                p.lat < 47 || p.lat > 55.2 || p.lng < 5.5 || p.lng > 15.5
+              ) return null;
               // Winziger deterministischer Offset gegen exaktes Übereinanderliegen.
               const x = proj.X(p.lng) + ((i * 37) % 5 - 2) * 1.5;
               const y = proj.Y(p.lat) + ((i * 53) % 5 - 2) * 1.5;

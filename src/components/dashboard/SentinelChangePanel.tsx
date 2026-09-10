@@ -28,6 +28,7 @@ export const SentinelChangePanel = () => {
   const [current, setCurrent] = useState<{ street: string; house_number: string; zip: string; city: string } | null>(null);
   const [form, setForm] = useState({ street: "", house_number: "", zip: "", city: "" });
   const [lastStatus, setLastStatus] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -45,7 +46,7 @@ export const SentinelChangePanel = () => {
           .maybeSingle(),
         supabase
           .from("sentinel_change_requests")
-          .select("status")
+          .select("id, status")
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(1)
@@ -57,6 +58,7 @@ export const SentinelChangePanel = () => {
       setCurrent(base);
       setForm(base);
       setLastStatus((req?.status as string | undefined) ?? null);
+      setPendingId(req?.status === "pending" ? (req.id as string) : null);
       setBusy(false);
     })();
     return () => { cancelled = true; };
@@ -82,6 +84,23 @@ export const SentinelChangePanel = () => {
       if (error) throw error;
       toast({ title: "Änderung beantragt", description: "Ein Admin prüft die neuen Daten. Bis zur Freigabe bleibt die alte Adresse aktiv." });
       setLastStatus("pending");
+    } catch (e) {
+      toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cancel = async () => {
+    if (!pendingId) return;
+    if (!window.confirm("Änderungsantrag wirklich zurückziehen?")) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("sentinel_change_requests").delete().eq("id", pendingId);
+      if (error) throw error;
+      setPendingId(null);
+      setLastStatus(null);
+      toast({ title: "Änderungsantrag zurückgezogen" });
     } catch (e) {
       toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
     } finally {
@@ -133,6 +152,11 @@ export const SentinelChangePanel = () => {
             <Button size="sm" disabled={saving || lastStatus === "pending"} onClick={submit}>
               {saving ? "Sende …" : "Adresse ändern beantragen"}
             </Button>
+            {pendingId && (
+              <Button size="sm" variant="outline" disabled={saving} onClick={cancel}>
+                Antrag zurückziehen
+              </Button>
+            )}
             {current && (
               <span className="text-xs text-muted-foreground">
                 Aktuell: {current.street} {current.house_number}, {current.zip} {current.city}

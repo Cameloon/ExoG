@@ -5,17 +5,21 @@ import { useAuth } from "@/hooks/useAuth";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, MapPin, Clock, CheckCircle2, XCircle, List, Map as MapIcon, Globe } from "lucide-react";
+import { Building2, MapPin, Clock, CheckCircle2, XCircle, List, Map as MapIcon, Globe, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LoadingSnake } from "@/components/ui/loading-snake";
 import { mapRegionToState } from "@/lib/regionMap";
+import { geocode } from "@/lib/geocode";
 
 // Beide Karten lazy: GlowMap zieht Leaflet (~154 kB) nach, DeutschlandMap die
 // SVG-Grafik — erst wenn die jeweilige Ansicht gewählt wird.
 const GermanyMap = lazy(() => import("@/components/GermanyMap").then((m) => ({ default: m.GermanyMap })));
 const GlowMap = lazy(() => import("@/components/GlowMap").then((m) => ({ default: m.GlowMap })));
-import { fetchShelters, fetchMyRequests, sendShelterRequest } from "@/lib/shelters";
+import { fetchShelters, fetchMyRequests, sendShelterRequest, deleteShelterRequest } from "@/lib/shelters";
 import type { Shelter, ShelterRequest } from "@/lib/types";
+
+const toneFor = (kind: string | null | undefined, accepted: boolean) =>
+  kind === "gov" ? ("primary" as const) : accepted ? ("success" as const) : ("info" as const);
 
 const SentinelNetwork = () => {
   const { user, role, loading } = useAuth();
@@ -28,6 +32,9 @@ const SentinelNetwork = () => {
   const [view, setView] = useState<"list" | "map">("list");
   // GlowMap (Leaflet, einzeln zoombar) vs. Deutschland-Grafik (Choropleth).
   const [mapMode, setMapMode] = useState<"glow" | "de">("glow");
+  // Einrichtungen ohne Koordinaten: grobe Region-Geokodierung, damit Pins
+  // trotzdem erscheinen (nur der öffentliche Region-Text, keine Adresse).
+  const [fallbackPins, setFallbackPins] = useState<{ id: string; name: string; region: string; kind: string; lat: number; lng: number }[]>([]);
   const apply = async (shelterId: string) => {
     if (!user) return;
     setApplying(shelterId);
@@ -75,20 +82,54 @@ const SentinelNetwork = () => {
     () => new Set(requests.filter((r) => r.status === "accepted").map((r) => r.shelter_id)),
     [requests],
   );
+
+  useEffect(() => {
+    if (view !== "map" || shelters.length === 0) return;
+    const missing = shelters.filter((s) => (s.lat == null || s.lng == null) && (s.region ?? "").trim());
+    if (missing.length === 0) {
+      setFallbackPins([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const seen = new Map<string, [number, number] | null>();
+      const out: { id: string; name: string; region: string; kind: string; lat: number; lng: number }[] = [];
+      for (const s of missing) {
+        const region = (s.region ?? "").trim();
+        if (!seen.has(region)) seen.set(region, await geocode(`${region}, Deutschland`));
+        if (cancelled) return;
+        const pos = seen.get(region);
+        if (pos) out.push({ id: s.id, name: s.name, region, kind: s.kind, lat: pos[0], lng: pos[1] });
+      }
+      if (!cancelled) setFallbackPins(out);
+    })();
+    return () => { cancelled = true; };
+  }, [view, shelters]);
+
   const allPins = useMemo(
     () => [
       ...positioned.map((s) => ({
         key: s.id,
         name: s.name,
-        detail: `${s.region}${acceptedIds.has(s.id) ? " · akzeptiert" : ""}`,
+        detail: `${s.kind === "gov" ? "Behörde" : "Einrichtung"} · ${s.region}${acceptedIds.has(s.id) ? " · akzeptiert" : ""}`,
         href: `/shelters/${s.id}`,
         linkLabel: "Profil",
         lat: s.lat as number,
         lng: s.lng as number,
-        tone: acceptedIds.has(s.id) ? ("success" as const) : ("info" as const),
+        tone: toneFor(s.kind, acceptedIds.has(s.id)),
+      })),
+      ...fallbackPins.map((p) => ({
+        key: `${p.id}-ca`,
+        name: p.name,
+        detail: `${p.kind === "gov" ? "Behörde" : "Einrichtung"} · ${p.region} · ca. Lage`,
+        href: `/shelters/${p.id}`,
+        linkLabel: "Profil",
+        lat: p.lat,
+        lng: p.lng,
+        tone: toneFor(p.kind, false),
       })),
     ],
-    [positioned, acceptedIds],
+    [positioned, fallbackPins, acceptedIds],
   );
   const countsByRegion = useMemo(() => {
     const map: Record<string, number> = {};
@@ -124,6 +165,17 @@ const SentinelNetwork = () => {
       </div>
     );
   }
+
+  const withdraw = async (id: string) => {
+    if (!window.confirm("Anfrage wirklich zurückziehen?")) return;
+    try {
+      await deleteShelterRequest(supabase, id);
+      setRequests((r) => r.filter((x) => x.id !== id));
+      toast({ title: "Anfrage zurückgezogen" });
+    } catch (e) {
+      toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
+    }
+  };
 
   const statusIcon = (s: ShelterRequest["status"]) =>
     s === "accepted" ? <CheckCircle2 className="h-4 w-4 text-green-400" />
@@ -193,7 +245,8 @@ const SentinelNetwork = () => {
                         />
                       </Suspense>
                       <p className="mt-2 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 bg-info" aria-hidden /> Tierheim / Einrichtung</span>
+                        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 bg-info" aria-hidden /> Einrichtung</span>
+                        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 bg-primary" aria-hidden /> Behörde</span>
                         <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 bg-success" aria-hidden /> Akzeptiert</span>
                       </p>
                     </div>
@@ -203,12 +256,13 @@ const SentinelNetwork = () => {
                         <GlowMap points={allPins} />
                       </Suspense>
                       <p className="mt-2 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 bg-info" aria-hidden /> Tierheim / Einrichtung — Klick für Profil</span>
+                        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 bg-info" aria-hidden /> Einrichtung — Klick für Profil</span>
+                        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 bg-primary" aria-hidden /> Behörde</span>
                         <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 bg-success" aria-hidden /> Akzeptiert</span>
                       </p>
                     </div>
                   ) : (
-                    <p className="border border-border bg-surface p-8 text-sm text-muted-foreground">Noch keine Einrichtung mit Koordinaten erfasst — Bewerbung unten über die Liste.</p>
+                    <p className="border border-border bg-surface p-8 text-sm text-muted-foreground">Noch keine Einrichtung mit Position erfasst — Bewerbung unten über die Liste.</p>
                   )}
                 </div>
               )}
@@ -222,7 +276,12 @@ const SentinelNetwork = () => {
                       <li key={s.id} className="flex items-center justify-between gap-4 px-5 py-4">
                         <div className="min-w-0">
                           <Link to={`/shelters/${s.id}`} className="font-medium hover:text-primary transition-colors">{s.name}</Link>
-                          <p className="mt-1 flex items-center gap-1 truncate text-xs text-muted-foreground"><MapPin className="h-3 w-3" /> {s.region}</p>
+                          <p className="mt-1 flex items-center gap-1 truncate text-xs text-muted-foreground">
+                            {s.kind === "gov" && (
+                              <span className="border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-primary">Behörde</span>
+                            )}
+                            <MapPin className="h-3 w-3" /> {s.region}
+                          </p>
                         </div>
                         <div className="flex shrink-0 items-center gap-3">
                           {existing ? (
@@ -259,7 +318,12 @@ const SentinelNetwork = () => {
                             {statusIcon(r.status)} {r.status}
                           </span>
                         </div>
-                        {s && <Link to={`/shelters/${s.id}`} className="shrink-0 font-mono text-[10px] uppercase tracking-[0.2em] text-primary hover:underline">Profil</Link>}
+                        <div className="flex shrink-0 items-center gap-3">
+                          {s && <Link to={`/shelters/${s.id}`} className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary hover:underline">Profil</Link>}
+                          <Button size="sm" variant="ghost" onClick={() => withdraw(r.id)}>
+                            <X className="mr-1 h-3 w-3" /> Zurückziehen
+                          </Button>
+                        </div>
                       </li>
                     );
                   })}

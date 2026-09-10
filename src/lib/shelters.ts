@@ -169,6 +169,18 @@ export async function setRequestStatus(
   if (error) throw error;
 }
 
+// Sentinel withdraws their own request (RLS: sentinel own FOR ALL) or the
+// shelter removes an incoming one (RLS: shelter owner FOR ALL). Deleting
+// instead of status='withdrawn' keeps the (shelter_id, sentinel_id) unique
+// constraint from blocking a later re-application.
+export async function deleteShelterRequest(
+  supabase: SupabaseClient<Database>,
+  id: string,
+): Promise<void> {
+  const { error } = await supabase.from("sentinel_shelter_requests").delete().eq("id", id);
+  if (error) throw error;
+}
+
 export async function fetchWardInterests(
   supabase: SupabaseClient<Database>,
   shelterId: string,

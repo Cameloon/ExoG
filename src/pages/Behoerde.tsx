@@ -96,13 +96,20 @@ const Behoerde = () => {
 
   const loadSentinels = useCallback(async () => {
     if (!region) return;
+    // Freitext-Regionen: RLS scoped bereits, Containment-Filter clientseitig
+    // ("München, Bayern" soll für "Bayern" sichtbar sein).
     const { data, error } = await supabase
       .from("sentinel_applications")
-      .select("user_id, full_name, capacity, pledge_data")
-      .eq("region", region)
+      .select("user_id, full_name, capacity, region, pledge_data")
       .eq("status", "approved")
       .range(0, 99);
-    setSentinels((data ?? []) as { user_id: string; full_name: string; capacity: string | null; pledge_data: { questionnaire?: unknown } | null }[]);
+    const target = region.trim().toLowerCase();
+    const rows = ((data ?? []) as { user_id: string; full_name: string; capacity: string | null; region: string | null; pledge_data: { questionnaire?: unknown } | null }[])
+      .filter((s) => {
+        const r = (s.region ?? "").trim().toLowerCase();
+        return !!r && (r === target || r.includes(target) || target.includes(r));
+      });
+    setSentinels(rows);
     // Silent failure here looked like "no sentinels" and broke assignment.
     if (error) {
       console.warn("dashboard: sentinel load", error.message);

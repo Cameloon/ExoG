@@ -157,14 +157,21 @@ const BehoerdeNetwork = () => {
     let cancelled = false;
     void (async () => {
       setBusy(true);
+      // Kein exakter .eq("region")-Match: RLS liefert bereits die Region,
+      // aber Regionen sind Freitext ("München, Bayern" vs. "Bayern") — daher
+      // clientseitig mit Containment filtern (wie die RLS-Policy).
       const { data, error } = await supabase
         .from("sentinel_applications")
         .select("user_id, case_id, full_name, region, experience_years, species_focus, capacity, tier, pledge_data")
         .eq("status", "approved")
-        .eq("region", region)
         .range(0, 199);
       if (cancelled) return;
-      setSentinels((data ?? []) as NetworkSentinel[]);
+      const target = region.trim().toLowerCase();
+      const rows = ((data ?? []) as NetworkSentinel[]).filter((s) => {
+        const r = (s.region ?? "").trim().toLowerCase();
+        return !!r && (r === target || r.includes(target) || target.includes(r));
+      });
+      setSentinels(rows);
       setBusy(false);
       // Fehlversorgung vermeiden: eine RLS-/Netzwerk-Fehlermeldung darf nicht
       // wie "keine Sentinels in der Region" aussehen.
@@ -199,18 +206,19 @@ const BehoerdeNetwork = () => {
       }
       setCounts(map);
       setUnmatched([...raw].slice(0, 8));
-      // Pins auf City-Level (keine Hausadressen): eindeutige PLZ+Ort geokodieren.
+      // Pins auf City-Level (keine Hausadressen): eindeutige PLZ+Ort geokodieren,
+      // ohne Ort auf die Region zurückfallen (RLS zeigt nur die eigene Region).
       setLocating(true);
       const seen = new Map<string, [number, number]>();
       const out: { lat: number; lng: number; name: string; detail?: string }[] = [];
       for (const row of rows) {
         const q = row.pledge_data?.questionnaire;
-        if (!q?.city) continue;
-        const key = `${q.zip ?? ""} ${q.city}`.trim();
+        const key = [q?.zip, q?.city].filter(Boolean).join(" ").trim() || (row.region ?? "").trim();
+        if (!key) continue;
         if (!seen.has(key)) seen.set(key, await geocode(`${key}, Deutschland`));
         if (cancelled) return;
         const pos = seen.get(key);
-        if (pos) out.push({ lat: pos[0], lng: pos[1], name: row.full_name, detail: `${row.tier ?? "—"} · ${q.city}` });
+        if (pos) out.push({ lat: pos[0], lng: pos[1], name: row.full_name, detail: `${row.tier ?? "—"} · ${q?.city ?? row.region ?? ""}` });
       }
       if (!cancelled) { setPins(out); setLocating(false); }
     })();
@@ -225,8 +233,9 @@ const BehoerdeNetwork = () => {
       const results: { key: string; name: string; tier: string | null; capacity: string; lat: number; lng: number }[] = [];
       for (const s of sentinels) {
         const q = s.pledge_data?.questionnaire;
-        if (!q?.city) continue;
-        const pos = await geocode(`${q.zip} ${q.city}, ${s.region}`);
+        const key = [q?.zip, q?.city].filter(Boolean).join(" ").trim() || (s.region ?? "").trim();
+        if (!key) continue;
+        const pos = await geocode(s.region ? `${key}, ${s.region}` : key);
         if (cancelled) return;
         if (pos) results.push({ key: s.user_id, name: s.full_name, tier: s.tier, capacity: s.capacity ?? "", lat: pos[0], lng: pos[1] });
       }

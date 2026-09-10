@@ -19,6 +19,7 @@ import {
   fetchShelterWards,
   fetchRequestsForShelter,
   setRequestStatus,
+  deleteShelterRequest,
 } from "@/lib/shelters";
 import { parseCapacity, totalCapacity } from "@/lib/habitats";
 import type { Shelter, Ward, ShelterRequest, WardInterest } from "@/lib/types";
@@ -50,7 +51,9 @@ const INTEREST_STATUS: Record<string, { lbl: string; cls: string }> = {
 };
 
 const Shelters = () => {
-  const { user, isEinrichtung, role, loading } = useAuth();
+  const { user, isEinrichtung, isBehoerde, role, loading } = useAuth();
+  const isGov = isBehoerde;
+  const canManageProfile = isEinrichtung || isBehoerde;
   const supabase = useExternalSupabase();
   const { toast } = useToast();
   const [tab, setTab] = useState<Tab>("profil");
@@ -150,6 +153,12 @@ const Shelters = () => {
     if (isEinrichtung && user) void load();
   }, [isEinrichtung, user, load]);
 
+  // Behörden verwalten ihr Standort-Profil (kind='gov') auf derselben Seite,
+  // damit Ämter auf der Netzwerk-Karte sichtbar sind.
+  useEffect(() => {
+    if (isBehoerde && user) void load();
+  }, [isBehoerde, user, load]);
+
   // If the user signed up as a shelter but the admin hasn't confirmed yet,
   // surface the pending/rejected state instead of a generic "no access".
   useEffect(() => {
@@ -180,13 +189,13 @@ const Shelters = () => {
     );
   }
 
-  // Role holders (sentinel/gov/admin) have no shelter business — bounce them
-  // off the registration page; only role-less users may register as Einrichtung.
-  if (!isEinrichtung && role !== "user") {
+  // Sentinels/admins have no shelter business here — only institutions,
+  // authorities (gov location profile) and role-less users may proceed.
+  if (!canManageProfile && role !== "user") {
     return <Navigate to="/dashboard" replace />;
   }
 
-  if (!isEinrichtung) {
+  if (!canManageProfile) {
     if (pendingStatus === "pending") {
       return (
         <div className="min-h-screen bg-background text-foreground">
@@ -241,7 +250,7 @@ const Shelters = () => {
         ...(shelter ?? {}),
         ...form,
         owner_id: user.id,
-        kind: "shelter",
+        kind: isBehoerde ? "gov" : "shelter",
       } as Shelter);
       setShelter(saved);
       setEditing(false);
@@ -263,6 +272,25 @@ const Shelters = () => {
     }
   };
 
+  const removeRequest = async (id: string) => {
+    if (!window.confirm("Anfrage endgültig löschen? Der/die Sentinel kann sich danach erneut bewerben.")) return;
+    const req = requests.find((x) => x.id === id);
+    try {
+      await deleteShelterRequest(supabase, id);
+      setRequests((r) => r.filter((x) => x.id !== id));
+      if (req) {
+        setApplicants((prev) => {
+          const next = { ...prev };
+          delete next[req.sentinel_id];
+          return next;
+        });
+      }
+      toast({ title: "Anfrage gelöscht" });
+    } catch (e) {
+      toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
+    }
+  };
+
   const respondInterest = async (id: string, status: "matched" | "declined") => {
     try {
       await setInterestStatus(supabase, id, status);
@@ -279,8 +307,8 @@ const Shelters = () => {
       <main className="container py-12">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <span className="eyebrow">§ Einrichtung</span>
-            <h1 className="font-editorial mt-2 text-4xl md:text-5xl">{shelter?.name ?? "Meine Einrichtung"}</h1>
+            <span className="eyebrow">§ {isGov ? "Behörde" : "Einrichtung"}</span>
+            <h1 className="font-editorial mt-2 text-4xl md:text-5xl">{shelter?.name ?? (isGov ? "Meine Behörde" : "Meine Einrichtung")}</h1>
             <p className="mt-3 text-muted-foreground">{shelter?.region ?? "—"}</p>
           </div>
           <div className="flex gap-px bg-border">
@@ -416,12 +444,17 @@ const Shelters = () => {
                               {r.message && <p className="mt-1 text-xs text-muted-foreground">{r.message}</p>}
                               <span className="mt-1 inline-block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{r.status}</span>
                             </div>
-                            {r.status === "open" && (
-                              <div className="flex gap-2">
-                                <Button size="sm" variant="outline" onClick={() => respond(r.id, "accepted")}><Check className="mr-1 h-3 w-3" /> Annehmen</Button>
-                                <Button size="sm" variant="ghost" onClick={() => respond(r.id, "declined")}><X className="mr-1 h-3 w-3" /> Ablehnen</Button>
-                              </div>
-                            )}
+                            <div className="flex gap-2">
+                              {r.status === "open" && (
+                                <>
+                                  <Button size="sm" variant="outline" onClick={() => respond(r.id, "accepted")}><Check className="mr-1 h-3 w-3" /> Annehmen</Button>
+                                  <Button size="sm" variant="ghost" onClick={() => respond(r.id, "declined")}><X className="mr-1 h-3 w-3" /> Ablehnen</Button>
+                                </>
+                              )}
+                              <Button size="sm" variant="ghost" onClick={() => removeRequest(r.id)} title="Anfrage löschen">
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
                           </div>
 {expanded && app && (
                             <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 text-xs">

@@ -1,11 +1,13 @@
 // ponytail: client-side Photon geocode (CSP-approved), session-cached.
-// Fails silently → callers skip ungeocodierbare Adressen.
-const cache = new Map<string, [number, number] | null>();
+// Only successful lookups are cached — failures stay retryable across
+// navigation (a cached null previously made maps stay empty forever).
+const cache = new Map<string, [number, number]>();
 
 export async function geocode(query: string): Promise<[number, number] | null> {
   const key = query.trim();
   if (!key) return null;
-  if (cache.has(key)) return cache.get(key)!;
+  const cached = cache.get(key);
+  if (cached) return cached;
   try {
     const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(key)}&limit=1`);
     if (!res.ok) return null;
@@ -13,11 +15,11 @@ export async function geocode(query: string): Promise<[number, number] | null> {
       features?: { geometry?: { coordinates?: [number, number] } }[];
     };
     const pos = data.features?.[0]?.geometry?.coordinates;
-    const r = pos ? ([pos[1], pos[0]] as [number, number]) : null;
-    cache.set(key, r);
-    return r;
+    if (!pos || !Number.isFinite(pos[0]) || !Number.isFinite(pos[1])) return null;
+    const result: [number, number] = [pos[1], pos[0]];
+    cache.set(key, result);
+    return result;
   } catch {
-    cache.set(key, null);
     return null;
   }
 }
