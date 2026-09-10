@@ -10,6 +10,7 @@ import { PageLoader } from "@/components/ui/loading-snake";
 
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const SentinelPath = lazy(() => import("./pages/SentinelPath.tsx"));
+const Pledge = lazy(() => import("./pages/Pledge.tsx"));
 const SentinelApply = lazy(() => import("./pages/SentinelApply.tsx"));
 const Wards = lazy(() => import("./pages/Wards.tsx"));
 const Auth = lazy(() => import("./pages/Auth.tsx"));
@@ -70,6 +71,7 @@ const AppShell = () => (
             <Route path="/demo" element={<Dashboard />} />
             <Route path="/care" element={<RequireAuth><Care /></RequireAuth>} />
             <Route path="/sentinel" element={<SentinelPath />} />
+            <Route path="/pledge" element={<Pledge />} />
             <Route path="/sentinel/apply" element={<RequireAuth><SentinelApply /></RequireAuth>} />
             <Route path="/wards" element={<RequireAuth><Wards /></RequireAuth>} />
             <Route path="/auth" element={<Auth />} />

@@ -11,7 +11,7 @@
 // Secrets: BREVO_API_KEY (brevo.com → SMTP & API → API Keys), EMAIL_FROM
 // (verified sender, e.g. "BioSteward <noreply@yourdomain.de>"), APP_ORIGIN.
 
-const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "http://localhost:5173";
+const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "http://localhost:8080";
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY") ?? "";
 const EMAIL_FROM = Deno.env.get("EMAIL_FROM") ?? "BioSteward <noreply@example.com>";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";

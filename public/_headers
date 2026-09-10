@@ -1,0 +1,11 @@
+# Hosting security headers (Netlify/Cloudflare Pages style file).
+# The meta CSP in index.html stays as dev fallback ('unsafe-inline' needed by
+# Vite's dev preamble); these real HTTP headers win once deployed and drop
+# script-src 'unsafe-inline'. Keep origins in sync with index.html.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+  Content-Security-Policy: default-src 'self'; img-src 'self' data: blob: https://*.supabase.co https://*.tile.openstreetmap.org; font-src 'self' data: https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://*.clerk.accounts.dev https://challenges.cloudflare.com; connect-src 'self' https://*.supabase.co https://*.clerk.accounts.dev https://clerk-telemetry.com https://challenges.cloudflare.com https://photon.komoot.io; frame-src 'self' https://*.clerk.accounts.dev https://challenges.cloudflare.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

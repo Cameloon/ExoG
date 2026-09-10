@@ -70,12 +70,26 @@ const Shelters = () => {
   const requestAccess = async () => {
     if (!user) return;
     setRequesting(true);
-    const { error } = await supabase.from("pending_shelter_requests").upsert({
+    const payload = {
       user_id: user.id,
       email: user.email ?? "",
       display_name: user.displayName ?? null,
-      status: "pending",
-    });
+      status: "pending" as const,
+    };
+    const { data: existing, error: lookupError } = await supabase
+      .from("pending_shelter_requests")
+      .select("id, status")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const { error } = lookupError
+      ? { error: lookupError }
+      : existing?.status === "approved"
+        ? { error: null }
+        : existing
+          ? await supabase.from("pending_shelter_requests").update(payload).eq("id", existing.id)
+          : await supabase.from("pending_shelter_requests").insert(payload);
     setRequesting(false);
     if (error) {
       toast({ title: "Antrag fehlgeschlagen", description: error.message, variant: "destructive" });
@@ -147,6 +161,8 @@ const Shelters = () => {
       .from("pending_shelter_requests")
       .select("status")
       .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle()
       .then(({ data }) =>
         setPendingStatus((data as { status: "pending" | "rejected" } | null)?.status ?? null),
@@ -521,7 +537,9 @@ const ShelterProfileForm = ({
         // Manual lat/lng fields below are the fallback knob.
         let glat = lat, glng = lng;
         if (!glat || !glng) {
-          const q = [address, district, state].filter(Boolean).join(", ");
+          // Only send a coarse location to the geocoder. The exact address
+          // stays in Supabase and is never sent to a third-party map service.
+          const q = [district, state].filter(Boolean).join(", ");
           if (q) try {
             const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1`);
             const data = await res.json() as { features: { geometry: { coordinates: [number, number] } }[] };

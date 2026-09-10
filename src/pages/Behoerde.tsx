@@ -96,14 +96,19 @@ const Behoerde = () => {
 
   const loadSentinels = useCallback(async () => {
     if (!region) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("sentinel_applications")
       .select("user_id, full_name, capacity, pledge_data")
       .eq("region", region)
       .eq("status", "approved")
       .range(0, 99);
     setSentinels((data ?? []) as { user_id: string; full_name: string; capacity: string | null; pledge_data: { questionnaire?: unknown } | null }[]);
-  }, [region, supabase]);
+    // Silent failure here looked like "no sentinels" and broke assignment.
+    if (error) {
+      console.warn("dashboard: sentinel load", error.message);
+      toast({ title: "Laden fehlgeschlagen", description: error.message, variant: "destructive" });
+    }
+  }, [region, supabase, toast]);
 
   const assignSentinel = async (wardId: string) => {
     if (!assignTo) return;

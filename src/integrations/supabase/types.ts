@@ -827,7 +827,21 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      shelter_directory: {
+        Row: {
+          id: string
+          name: string
+          kind: Database["public"]["Enums"]["user_kind"]
+          region: string
+          description: string | null
+          capacity_notes: string | null
+          lat: number | null
+          lng: number | null
+          created_at: string
+          updated_at: string
+        }
+        Relationships: []
+      }
     }
     Functions: {
       append_care_log: {

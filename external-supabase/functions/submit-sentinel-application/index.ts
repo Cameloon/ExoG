@@ -16,12 +16,13 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "ideal-tetra-26.clerk.accounts.dev";
 const CLERK_SECRET_KEY = Deno.env.get("CLERK_SECRET_KEY") ?? "";
-const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "http://localhost:5173";
+const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "http://localhost:8080";
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY") ?? "";
 const EMAIL_FROM = Deno.env.get("EMAIL_FROM") ?? "BioSteward <noreply@example.com>";
 
 const BUCKET = "kyc-documents";
 const MAX_BYTES = 10 * 1024 * 1024;
+const MAX_REQUEST_BYTES = 45 * 1024 * 1024;
 const REQUIRED_SLOTS = ["id_front", "id_back", "selfie"] as const;
 const ALL_SLOTS = ["id_front", "id_back", "selfie", "facility"] as const;
 type Slot = (typeof ALL_SLOTS)[number];
@@ -169,10 +170,15 @@ function cleanFileName(name: string): string {
 
 function validatePayload(input: unknown): Payload {
   const p = input as Partial<Payload>;
+  const text = (value: unknown, key: string, max: number) => {
+    if (typeof value !== "string" || !value.trim()) throw new Error(`missing ${key}`);
+    const result = value.trim();
+    if (result.length > max) throw new Error(`${key} too long`);
+    return result;
+  };
   const requiredStrings: (keyof Payload)[] = ["fullName", "region", "species", "capacity", "vetContact", "motivation"];
-  for (const key of requiredStrings) {
-    if (typeof p[key] !== "string" || !(p[key] as string).trim()) throw new Error(`missing ${String(key)}`);
-  }
+  const maxByKey: Record<string, number> = { fullName: 160, region: 120, species: 500, capacity: 1000, vetContact: 240, motivation: 5000 };
+  for (const key of requiredStrings) text(p[key], String(key), maxByKey[String(key)]);
   if (!["yes", "partial", "no"].includes(p.quarantine ?? "")) throw new Error("invalid quarantine");
   if (!Number.isFinite(p.yearsKeeping) || Number(p.yearsKeeping) < 0 || Number(p.yearsKeeping) > 80) throw new Error("invalid yearsKeeping");
   const requiredCommitments: (keyof Payload["commitments"])[] = [
@@ -197,15 +203,17 @@ function validatePayload(input: unknown): Payload {
   const q = p.questionnaire as Partial<Questionnaire> | undefined;
   const requiredQ: (keyof Questionnaire)[] = ["street", "house_number", "zip", "city", "phone", "birth_date", "feeding"];
   for (const key of requiredQ) {
-    if (typeof q?.[key] !== "string" || !(q[key] as string).trim()) throw new Error(`missing questionnaire.${String(key)}`);
+    text(q?.[key], `questionnaire.${String(key)}`, key === "feeding" ? 3000 : 240);
   }
   if (!/^\d{5}$/.test(q!.zip.trim())) throw new Error("invalid questionnaire.zip");
   if (ageFrom(q!.birth_date) < 16) throw new Error("invalid questionnaire.birth_date (min 16)");
   const enclosure = q!.enclosure ?? ({} as Questionnaire["enclosure"]);
-  for (const key of ["size", "lighting", "climate", "setup"] as const) {
-    if (typeof enclosure[key] !== "string" || !enclosure[key].trim()) throw new Error(`missing questionnaire.enclosure.${key}`);
-  }
-  const enc = { size: enclosure.size.trim(), lighting: enclosure.lighting.trim(), climate: enclosure.climate.trim(), setup: enclosure.setup.trim() };
+  const enc = {
+    size: text(enclosure.size, "questionnaire.enclosure.size", 500),
+    lighting: text(enclosure.lighting, "questionnaire.enclosure.lighting", 500),
+    climate: text(enclosure.climate, "questionnaire.enclosure.climate", 500),
+    setup: text(enclosure.setup, "questionnaire.enclosure.setup", 2000),
+  };
   const sachkunde = (q!.sachkunde ?? "none") as Questionnaire["sachkunde"];
   if (!["none", "bna", "dght", "other"].includes(sachkunde)) throw new Error("invalid questionnaire.sachkunde");
   if (sachkunde === "other" && !(q!.sachkunde_detail ?? "").trim()) throw new Error("missing questionnaire.sachkunde_detail");
@@ -217,10 +225,10 @@ function validatePayload(input: unknown): Payload {
     phone: (q!.phone ?? "").trim(),
     birth_date: q!.birth_date,
     enclosure: enc,
-    current_stock: (q!.current_stock ?? "").trim(),
-    feeding: q!.feeding.trim(),
-    overwintering: (q!.overwintering ?? "").trim(),
-    info_sources: Array.isArray(q!.info_sources) ? q!.info_sources.map((s) => String(s).trim()).filter(Boolean).slice(0, 12) : [],
+    current_stock: text(q!.current_stock ?? "", "questionnaire.current_stock", 3000),
+    feeding: text(q!.feeding, "questionnaire.feeding", 3000),
+    overwintering: text(q!.overwintering ?? "", "questionnaire.overwintering", 2000),
+    info_sources: Array.isArray(q!.info_sources) ? q!.info_sources.map((s) => text(String(s), "questionnaire.info_sources", 240)).filter(Boolean).slice(0, 12) : [],
     sachkunde,
     sachkunde_detail: (q!.sachkunde_detail ?? "").trim(),
   };
@@ -418,6 +426,14 @@ Deno.serve(async (req) => {
   if (rateLimited(userId)) {
     return new Response(JSON.stringify({ error: "rate limited" }), {
       status: 429,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const contentLength = Number(req.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_REQUEST_BYTES) {
+    return new Response(JSON.stringify({ error: "request too large" }), {
+      status: 413,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

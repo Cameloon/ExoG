@@ -10,7 +10,7 @@
 //
 // Secrets: CLERK_SECRET_KEY (Clerk dashboard → API keys), APP_ORIGIN.
 
-const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "http://localhost:5173";
+const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "http://localhost:8080";
 const CLERK_SECRET_KEY = Deno.env.get("CLERK_SECRET_KEY") ?? "";
 const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "ideal-tetra-26.clerk.accounts.dev";
 const CLERK_JWKS_URL = `https://${CLERK_DOMAIN}/.well-known/jwks.json`;

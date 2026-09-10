@@ -6,7 +6,7 @@ export async function fetchShelters(
   supabase: SupabaseClient<Database>,
   opts?: { region?: string | null },
 ): Promise<Shelter[]> {
-  let q = supabase.from("shelters").select("*").order("created_at", { ascending: false });
+  let q = supabase.from("shelter_directory").select("*").order("created_at", { ascending: false });
   if (opts?.region) q = q.eq("region", opts.region);
   const { data, error } = await q.limit(200);
   if (error) throw error;
@@ -18,7 +18,7 @@ export async function fetchShelter(
   id: string,
 ): Promise<Shelter | null> {
   const { data, error } = await supabase
-    .from("shelters")
+    .from("shelter_directory")
     .select("*")
     .eq("id", id)
     .maybeSingle();
@@ -34,6 +34,8 @@ export async function fetchMyShelter(
     .from("shelters")
     .select("*")
     .eq("owner_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (error) throw error;
   return (data ?? null) as Shelter | null;

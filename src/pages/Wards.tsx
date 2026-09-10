@@ -192,6 +192,8 @@ const Wards = () => {
       .from("shelters")
       .select("id")
       .eq("owner_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle()
       .then(({ data }) => setMyShelterId((data as { id: string } | null)?.id ?? null));
   }, [isEinrichtung, user, supabase]);

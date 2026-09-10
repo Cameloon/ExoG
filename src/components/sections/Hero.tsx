@@ -109,6 +109,9 @@ export const Hero = () => {
                 </div>
               ))}
             </dl>
+            <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-white/30">
+              Pilotdaten · Region Süd · Stand {new Date().toLocaleDateString("de-DE")}
+            </p>
           </div>
         </div>
 

@@ -103,12 +103,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // Fallback region from profiles table when admins assign region there instead of Clerk metadata.
   const [profileRegion, setProfileRegion] = useState<string | null>(null);
+  const [profileRegionLoading, setProfileRegionLoading] = useState(true);
 
   useEffect(() => {
-    if (!userLoaded || !clerkUser) { setProfileRegion(null); return; }
-    supabase.from("profiles").select("region").eq("id", clerkUser.id).maybeSingle()
-      .then(({ data }) => setProfileRegion((data as { region: string } | null)?.region ?? null));
-  }, [userLoaded, clerkUser, supabase]);
+    if (!userLoaded || !authLoaded) return;
+    if (!clerkUser) {
+      setProfileRegion(null);
+      setProfileRegionLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setProfileRegionLoading(true);
+    supabase
+      .from("profiles")
+      .select("region")
+      .eq("id", clerkUser.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) {
+          setProfileRegion((data as { region: string } | null)?.region ?? null);
+          setProfileRegionLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [userLoaded, authLoaded, clerkUser, supabase]);
 
   // A shelter user may be granted access via an admin-approved
   // pending_shelter_requests row (no manual Clerk role step required).
@@ -118,63 +136,49 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // the Wards gate kicked the user out ("Sentinel-Pfad") after reload.
   // Now: order+limit, and retry transient failures instead of failing once.
   const [approvedShelter, setApprovedShelter] = useState(false);
-  useEffect(() => {
-    if (!userLoaded || !clerkUser) { setApprovedShelter(false); return; }
-    let cancelled = false;
-    void (async () => {
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const { data, error } = await supabase
-          .from("pending_shelter_requests")
-          .select("status")
-          .eq("user_id", clerkUser.id)
-          .eq("status", "approved")
-          .order("created_at", { ascending: false })
-          .limit(1);
-        if (!error) {
-          if (!cancelled) setApprovedShelter(Boolean(data));
-          return;
-        }
-        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [userLoaded, clerkUser, supabase]);
   const [sentinelApproved, setSentinelApproved] = useState(false);
   const [sentinelTier, setSentinelTier] = useState<string | null>(null);
+  const [accessLoading, setAccessLoading] = useState(true);
+
   useEffect(() => {
-    if (!userLoaded || !clerkUser) {
+    if (!userLoaded || !authLoaded) return;
+    if (!clerkUser) {
       setApprovedShelter(false);
       setSentinelApproved(false);
       setSentinelTier(null);
+      setAccessLoading(false);
       return;
     }
     const meta = clerkUser.publicMetadata as { role?: string } | null;
     let cancelled = false;
+    setAccessLoading(true);
     void (async () => {
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const { data, error } = await supabase
-          .from("sentinel_applications")
-          .select("status, tier")
-          .eq("user_id", clerkUser.id)
-          .eq("status", "approved")
-          .order("created_at", { ascending: false })
-          .limit(1);
-        if (!error) {
-          if (!cancelled) {
-            const approved = Boolean(data) || meta?.role === "sentinel";
-            setSentinelApproved(approved);
-            setSentinelTier((data as { tier?: string | null }[] | null)?.[0]?.tier ?? null);
-          }
-          return;
+      const read = async (table: "pending_shelter_requests" | "sentinel_applications") => {
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const query = table === "pending_shelter_requests"
+            ? supabase.from(table).select("status").eq("user_id", clerkUser.id).eq("status", "approved").order("created_at", { ascending: false }).limit(1)
+            : supabase.from(table).select("status, tier").eq("user_id", clerkUser.id).eq("status", "approved").order("created_at", { ascending: false }).limit(1);
+          const result = await query;
+          if (!result.error) return result.data ?? [];
+          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
         }
-        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
-      }
+        return [];
+      };
+      const [shelterRows, sentinelRows] = await Promise.all([
+        read("pending_shelter_requests"),
+        read("sentinel_applications"),
+      ]);
+      if (cancelled) return;
+      setApprovedShelter(shelterRows.length > 0);
+      setSentinelApproved(sentinelRows.length > 0 || meta?.role === "sentinel");
+      setSentinelTier((sentinelRows as { tier?: string | null }[])[0]?.tier ?? null);
+      setAccessLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [userLoaded, clerkUser, supabase]);
+  }, [userLoaded, authLoaded, clerkUser, supabase]);
 
   const value = useMemo<AuthContextValue>(() => {
-    const loading = !userLoaded || !authLoaded;
+    const loading = !userLoaded || !authLoaded || (Boolean(clerkUser) && (accessLoading || profileRegionLoading));
     if (loading || !clerkUser) {
       return {
         user: null,
@@ -238,7 +242,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         await clerk.signOut();
       },
     };
-  }, [userLoaded, authLoaded, clerkUser, clerk, approvedShelter, sentinelApproved, sentinelTier, profileRegion]);
+  }, [userLoaded, authLoaded, clerkUser, clerk, approvedShelter, sentinelApproved, sentinelTier, profileRegion, accessLoading, profileRegionLoading]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 

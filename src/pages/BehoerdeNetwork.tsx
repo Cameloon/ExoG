@@ -12,6 +12,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Button } from "@/components/ui/button";
 import { LoadingSnake } from "@/components/ui/loading-snake";
+import { toast } from "@/hooks/use-toast";
 import { Map as MapIcon, List, Globe, MapPin, Container, ShieldCheck, GraduationCap, Boxes, PawPrint, Thermometer, Lightbulb, Stethoscope, Phone } from "lucide-react";
 
 type NetworkSentinel = {
@@ -165,7 +166,12 @@ const BehoerdeNetwork = () => {
       if (cancelled) return;
       setSentinels((data ?? []) as NetworkSentinel[]);
       setBusy(false);
-      if (error) console.warn("network: sentinel load", error.message);
+      // Fehlversorgung vermeiden: eine RLS-/Netzwerk-Fehlermeldung darf nicht
+      // wie "keine Sentinels in der Region" aussehen.
+      if (error) {
+        console.warn("network: sentinel load", error.message);
+        toast({ title: "Laden fehlgeschlagen", description: error.message, variant: "destructive" });
+      }
     })();
     return () => { cancelled = true; };
   }, [isBehoerde, region, user, supabase]);
@@ -220,8 +226,7 @@ const BehoerdeNetwork = () => {
       for (const s of sentinels) {
         const q = s.pledge_data?.questionnaire;
         if (!q?.city) continue;
-        const addr = `${q.street?.trim() ?? ""} ${q.house_number?.trim() ?? ""}`.trim();
-        const pos = await geocode(`${addr}, ${q.zip} ${q.city}, ${s.region}`);
+        const pos = await geocode(`${q.zip} ${q.city}, ${s.region}`);
         if (cancelled) return;
         if (pos) results.push({ key: s.user_id, name: s.full_name, tier: s.tier, capacity: s.capacity ?? "", lat: pos[0], lng: pos[1] });
       }

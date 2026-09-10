@@ -327,7 +327,9 @@ const Admin = () => {
       toast({ title: "Doc not accessible", variant: "destructive" });
       return;
     }
-    window.open(data.signedUrl, "_blank");
+    // noopener: KYC files are user-uploaded content — the new tab must not
+    // be able to reach back into this admin tab (reverse tabnabbing).
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
   const previewDoc = async (path: string, mime: string | null) => {

@@ -37,6 +37,10 @@ every step. Allow ~30 minutes the first time.
    `ward_interest`, `shelters`, `sentinel_shelter_requests`,
    `pending_shelter_requests`, `cites_species`, `care_logs`, the
    `kyc-documents` / `ward-images` storage buckets, and all RLS policies.
+5. **Verification:** After migrations, paste `external-supabase/smoke-test.sql`
+   into the SQL Editor and run it. Every block must return `ok` (or zero rows
+   where noted) — that confirms tables, RLS, buckets, and uniqueness are in
+   place. Re-run it after any migration change.
 
 ## 4. Deploy the edge functions (web dashboard, no CLI needed)
 
@@ -62,7 +66,7 @@ API → Edge Functions → Secrets) and set these key-value pairs:
 
 | Secret | Value |
 |--------|-------|
-| `APP_ORIGIN` | Your app URL, e.g. `http://localhost:5173` for local dev or `https://app.deinedomain.de` for production |
+| `APP_ORIGIN` | Your app URL, e.g. `http://localhost:8080` for local dev or `https://app.deinedomain.de` for production |
 | `CLERK_SECRET_KEY` | From **Clerk Dashboard → API Keys** — the server-side key (starts with `sk_`) |
 | `CLERK_DOMAIN` | e.g. `ideal-tetra-26.clerk.accounts.dev` — your Clerk instance domain |
 | `BREVO_API_KEY` | From **brevo.com → SMTP & API → API Keys** — only needed if you want real confirmation emails. Brevo: EU-based (FR), 300 mails/day free tier, DPA available |

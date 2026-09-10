@@ -23,7 +23,7 @@ const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "ideal-tetra-26.clerk.accou
 const BUCKET = "kyc-documents";
 const MAX_BYTES = 10 * 1024 * 1024;
 
-const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "http://localhost:5173";
+const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "http://localhost:8080";
 const corsHeaders = {
   "Access-Control-Allow-Origin": APP_ORIGIN,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-application-id, x-slot",
@@ -142,6 +142,11 @@ Deno.serve(async (req) => {
 
   if (!(await applicationWritable(applicationId, userId))) {
     return new Response(JSON.stringify({ error: "application not writable" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  const contentLength = Number(req.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_BYTES) {
+    return new Response(JSON.stringify({ error: "file too large (max 10 MB)" }), { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
   const buf = new Uint8Array(await req.arrayBuffer());
