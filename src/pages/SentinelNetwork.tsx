@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, MapPin, Clock, CheckCircle2, XCircle, List, Map as MapIcon, Globe, X } from "lucide-react";
+import { Building2, MapPin, Clock, CheckCircle2, XCircle, List, Map as MapIcon, Globe, X, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LoadingSnake } from "@/components/ui/loading-snake";
 import { mapRegionToState } from "@/lib/regionMap";
@@ -35,6 +35,7 @@ const SentinelNetwork = () => {
   // Einrichtungen ohne Koordinaten: grobe Region-Geokodierung, damit Pins
   // trotzdem erscheinen (nur der öffentliche Region-Text, keine Adresse).
   const [fallbackPins, setFallbackPins] = useState<{ id: string; name: string; region: string; kind: string; lat: number; lng: number }[]>([]);
+  const [showHidden, setShowHidden] = useState(false);
   const apply = async (shelterId: string) => {
     if (!user) return;
     setApplying(shelterId);
@@ -167,7 +168,7 @@ const SentinelNetwork = () => {
   }
 
   const withdraw = async (id: string) => {
-    if (!window.confirm("Anfrage wirklich zurückziehen?")) return;
+    if (!window.confirm("Anfrage wirklich zurückziehen? Der Eintrag wird endgültig entfernt.")) return;
     try {
       await deleteShelterRequest(supabase, id);
       setRequests((r) => r.filter((x) => x.id !== id));
@@ -176,6 +177,28 @@ const SentinelNetwork = () => {
       toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
     }
   };
+
+  // Nur die eigene Ansicht: der Eintrag verschwindet aus "Meine Anfragen",
+  // die Anfrage/Verbindung (z.B. akzeptiert) bleibt unangetastet.
+  const setHiddenFlag = async (id: string, hidden: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("sentinel_shelter_requests")
+        .update({ sentinel_hidden: hidden })
+        .eq("id", id);
+      if (error) throw error;
+      setRequests((rs) => rs.map((x) => (x.id === id ? { ...x, sentinel_hidden: hidden } : x)));
+      toast({
+        title: hidden ? "Aus deiner Liste ausgeblendet" : "Wieder eingeblendet",
+        description: hidden ? "Die Verbindung zur Einrichtung bleibt bestehen." : undefined,
+      });
+    } catch (e) {
+      toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
+    }
+  };
+
+  const hiddenCount = requests.filter((r) => r.sentinel_hidden).length;
+  const visibleRequests = showHidden ? requests : requests.filter((r) => !r.sentinel_hidden);
 
   const statusIcon = (s: ShelterRequest["status"]) =>
     s === "accepted" ? <CheckCircle2 className="h-4 w-4 text-green-400" />
@@ -307,27 +330,61 @@ const SentinelNetwork = () => {
               {requests.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">Du hast noch keine Anfragen gesendet.</p>
               ) : (
-                <ul className="mt-4 divide-y divide-border border border-border bg-surface">
-                  {requests.map((r) => {
-                    const s = shelters.find((x) => x.id === r.shelter_id);
-                    return (
-                      <li key={r.id} className="flex items-center justify-between gap-4 px-5 py-4">
-                        <div>
-                          <p className="text-sm">{s?.name ?? "Einrichtung"}</p>
-                          <span className="mt-1 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                            {statusIcon(r.status)} {r.status}
-                          </span>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-3">
-                          {s && <Link to={`/shelters/${s.id}`} className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary hover:underline">Profil</Link>}
-                          <Button size="sm" variant="ghost" onClick={() => withdraw(r.id)}>
-                            <X className="mr-1 h-3 w-3" /> Zurückziehen
-                          </Button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <>
+                  {hiddenCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowHidden((v) => !v)}
+                      className="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground"
+                    >
+                      {showHidden ? `Ausgeblendete verbergen (${hiddenCount})` : `${hiddenCount} ausgeblendet · einblenden`}
+                    </button>
+                  )}
+                  {visibleRequests.length === 0 ? (
+                    <p className="mt-4 text-sm text-muted-foreground">Keine sichtbaren Anfragen — ausgeblendete einblenden.</p>
+                  ) : (
+                    <ul className="mt-4 divide-y divide-border border border-border bg-surface">
+                      {visibleRequests.map((r) => {
+                        const s = shelters.find((x) => x.id === r.shelter_id);
+                        return (
+                          <li key={r.id} className="flex items-center justify-between gap-4 px-5 py-4">
+                            <div>
+                              <p className="text-sm">{s?.name ?? "Einrichtung"}</p>
+                              <span className="mt-1 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                                {statusIcon(r.status)} {r.status}
+                                {r.sentinel_hidden && <span className="text-muted-foreground/70">· ausgeblendet</span>}
+                              </span>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              {s && <Link to={`/shelters/${s.id}`} className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary hover:underline">Profil</Link>}
+                              {r.sentinel_hidden ? (
+                                <Button size="sm" variant="outline" onClick={() => setHiddenFlag(r.id, false)}>
+                                  <Eye className="mr-1 h-3 w-3" /> Einblenden
+                                </Button>
+                              ) : (
+                                <>
+                                  {r.status === "open" && (
+                                    <Button size="sm" variant="ghost" onClick={() => withdraw(r.id)}>
+                                      <X className="mr-1 h-3 w-3" /> Zurückziehen
+                                    </Button>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => setHiddenFlag(r.id, true)}
+                                    title="Nur aus deiner Liste ausblenden — die Verbindung zur Einrichtung bleibt bestehen"
+                                  >
+                                    <EyeOff className="mr-1 h-3 w-3" /> Ausblenden
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </>
               )}
             </section>
           </div>

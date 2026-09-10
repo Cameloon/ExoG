@@ -695,6 +695,7 @@ export type Database = {
           sentinel_id: string
           message: string | null
           status: Database["public"]["Enums"]["shelter_request_status"]
+          sentinel_hidden: boolean
           created_at: string
           updated_at: string
         }
@@ -704,6 +705,7 @@ export type Database = {
           sentinel_id: string
           message?: string | null
           status?: Database["public"]["Enums"]["shelter_request_status"]
+          sentinel_hidden?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -713,6 +715,7 @@ export type Database = {
           sentinel_id?: string
           message?: string | null
           status?: Database["public"]["Enums"]["shelter_request_status"]
+          sentinel_hidden?: boolean
           created_at?: string
           updated_at?: string
         }
