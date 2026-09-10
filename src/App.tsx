@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { isConfigured } from "@/config/external";
 import { PageLoader } from "@/components/ui/loading-snake";
+import { V2Scope } from "@/components/V2Scope";
 import "@/i18n";
 
 // Route-level code splitting: public landing variants stay separate from the
@@ -55,9 +56,9 @@ const App = () => {
               <Route path="/start" element={<LandingV2 />} />
               <Route path="/original" element={<Landing />} />
               <Route path="/v2" element={<LandingV2 />} />
-              <Route path="/werte" element={<Werte />} />
-              <Route path="/impressum" element={<Impressum />} />
-              <Route path="/datenschutz" element={<Datenschutz />} />
+              <Route path="/werte" element={<V2Scope><Werte /></V2Scope>} />
+              <Route path="/impressum" element={<V2Scope><Impressum /></V2Scope>} />
+              <Route path="/datenschutz" element={<V2Scope><Datenschutz /></V2Scope>} />
               <Route path="/*" element={<AppShell />} />
             </Routes>
           </Suspense>

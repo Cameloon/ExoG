@@ -62,8 +62,16 @@ html.dark .v2scope[data-acc="lagoon"]{
   --chart-4:188 86% 53%; --chart-5:187 92% 69%;
   --v2a:var(--chart-3); --v2ai:var(--chart-4);
 }
-/* App skin: primary actions follow the selected accent throughout the product. */
+/* App skin: primary actions follow the selected accent throughout the product.
+   (dark needs its own selector — html.dark .v2scope has higher specificity) */
 .v2scope[data-app-v2]{
+  --primary:var(--v2a);
+  --primary-foreground:200 14% 4%;
+  --ring:var(--v2a);
+  --accent:var(--v2a);
+  --accent-foreground:200 14% 4%;
+}
+html.dark .v2scope[data-app-v2]{
   --primary:var(--v2a);
   --primary-foreground:200 14% 4%;
   --ring:var(--v2a);
