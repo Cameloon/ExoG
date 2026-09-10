@@ -2,15 +2,45 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import type { Shelter, ShelterInput, Ward, ShelterRequest, ShelterRequestInput, WardInterest } from "./types";
 
-export async function fetchShelters(
+// Migration 00029 introduces the `shelter_directory` view (public columns +
+// rounded coordinates). Until it is applied server-side, fall back to the
+// base table but project only the same public columns, so the app works
+// without ever shipping address/contact fields to the client.
+const DIRECTORY_COLUMNS = "id, name, kind, region, description, capacity_notes, lat, lng, created_at, updated_at";
+
+function isMissingRelation(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return error.code === "PGRST205" || error.code === "42P01" || /schema cache/i.test(error.message ?? "");
+}
+
+const round2 = (value: number | null) => (value == null ? null : Math.round(value * 100) / 100);
+
+async function fetchDirectory(
   supabase: SupabaseClient<Database>,
   opts?: { region?: string | null },
 ): Promise<Shelter[]> {
   let q = supabase.from("shelter_directory").select("*").order("created_at", { ascending: false });
   if (opts?.region) q = q.eq("region", opts.region);
   const { data, error } = await q.limit(200);
-  if (error) throw error;
-  return (data ?? []) as Shelter[];
+  if (!error) return (data ?? []) as Shelter[];
+  if (!isMissingRelation(error)) throw error;
+
+  let fq = supabase.from("shelters").select(DIRECTORY_COLUMNS).order("created_at", { ascending: false });
+  if (opts?.region) fq = fq.eq("region", opts.region);
+  const fallback = await fq.limit(200);
+  if (fallback.error) throw fallback.error;
+  return (fallback.data ?? []).map((row) => ({
+    ...row,
+    lat: round2(row.lat),
+    lng: round2(row.lng),
+  })) as unknown as Shelter[];
+}
+
+export async function fetchShelters(
+  supabase: SupabaseClient<Database>,
+  opts?: { region?: string | null },
+): Promise<Shelter[]> {
+  return fetchDirectory(supabase, opts);
 }
 
 export async function fetchShelter(
@@ -22,8 +52,17 @@ export async function fetchShelter(
     .select("*")
     .eq("id", id)
     .maybeSingle();
-  if (error) throw error;
-  return (data ?? null) as Shelter | null;
+  if (!error) return (data ?? null) as Shelter | null;
+  if (!isMissingRelation(error)) throw error;
+
+  const fallback = await supabase
+    .from("shelters")
+    .select(DIRECTORY_COLUMNS)
+    .eq("id", id)
+    .maybeSingle();
+  if (fallback.error) throw fallback.error;
+  if (!fallback.data) return null;
+  return { ...fallback.data, lat: round2(fallback.data.lat), lng: round2(fallback.data.lng) } as unknown as Shelter;
 }
 
 export async function fetchMyShelter(
