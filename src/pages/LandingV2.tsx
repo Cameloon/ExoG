@@ -442,7 +442,7 @@ export const LandingV2 = () => {
                       </span>
                     </li>
                   )}
-                  <li className="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-4 sm:grid-cols-[1fr_9rem_minmax(0,1fr)] lg:flex lg:w-48 lg:shrink-0 lg:flex-col">
+                  <li className="grid grid-cols-[9rem_minmax(0,22rem)] justify-center gap-x-4 px-3 sm:grid-cols-[1fr_9rem_minmax(0,1fr)] sm:px-0 lg:flex lg:w-48 lg:shrink-0 lg:flex-col">
                     {/* mobil: Node-Kette horizontal mittig, Text rechts davon */}
                     <div className="flex flex-col sm:col-start-2">
                       {i > 0 && (
