@@ -442,16 +442,24 @@ export const LandingV2 = () => {
                       </span>
                     </li>
                   )}
-                  <li className="grid grid-cols-[10rem_minmax(0,1fr)] gap-x-4 lg:flex lg:w-48 lg:shrink-0 lg:flex-col">
-                    {/* mobil: Node links, Text rechts, senkrechter Strich unter dem Node */}
-                    <div className="flex flex-col">
+                  <li className="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-4 sm:grid-cols-[1fr_9rem_minmax(0,1fr)] lg:flex lg:w-48 lg:shrink-0 lg:flex-col">
+                    {/* mobil: Node-Kette horizontal mittig, Text rechts davon */}
+                    <div className="flex flex-col sm:col-start-2">
+                      {i > 0 && (
+                        <span
+                          aria-hidden="true"
+                          className={`v2edge v2edge-delay mx-auto mb-2 min-h-6 w-[2px] grow lg:!hidden ${i <= step ? "v2edge-done" : i === step + 1 ? "v2edge-run" : ""}`}
+                        >
+                          <span key={`${audience}-${step}`} />
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => setStep(i)}
                         aria-pressed={step === i}
                         aria-label={`Schritt ${s.n}: ${s.title}`}
                         aria-expanded={step === i}
-                        className={`v2node flex w-full flex-col items-stretch justify-between gap-3 p-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-[148px] ${i === step ? "v2node-on" : ""}`}
+                        className={`v2node flex w-full flex-col items-stretch justify-between gap-2 p-2.5 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-[148px] lg:gap-3 lg:p-3 ${i === step ? "v2node-on" : ""}`}
                       >
                         <span className="flex items-center justify-between gap-2">
                           <span className={`font-mono text-[11px] ${i <= step ? "v2a" : "text-muted-foreground"}`}>{s.n}</span>
@@ -468,7 +476,7 @@ export const LandingV2 = () => {
                             {s.icon ? <s.icon className="h-4 w-4 shrink-0 v2a" aria-hidden /> : null}
                             {s.title}
                           </span>
-                          <span className="mt-1.5 block font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">{s.time}</span>
+                          <span className="mt-1 block font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground lg:mt-1.5">{s.time}</span>
                         </span>
                       </button>
                       {i < flow.length - 1 && (
@@ -486,7 +494,7 @@ export const LandingV2 = () => {
                     */}
                     <p
                       aria-hidden={i !== step}
-                      className={`min-h-[72px] px-1 pb-1 pt-3 text-[13px] leading-relaxed text-muted-foreground lg:min-h-[120px] ${i === step ? "animate-fade-up" : "invisible"}`}
+                      className={`flex min-h-[72px] items-center self-center px-1 text-[13px] leading-relaxed text-muted-foreground sm:col-start-3 lg:block lg:min-h-[120px] lg:self-auto lg:pb-1 lg:pt-3 ${i === step ? "animate-fade-up" : "invisible"}`}
                     >
                       {s.body}
                     </p>

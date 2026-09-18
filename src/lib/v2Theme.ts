@@ -104,7 +104,9 @@ html.dark .v2scope[data-app-v2]{
 .v2paused .v2edge-run > span{ animation-play-state:paused; }
 @media (max-width:1023.5px){
   .v2edge > span{ transform:scaleY(0); transform-origin:center top; }
-  .v2edge-run > span{ animation-name:v2loadY; }
+  .v2edge-run > span{ animation-name:v2loadY; animation-duration:1.8s; }
+  /* untere Hälfte eines Gaps startet, wenn die obere halb durch ist */
+  .v2edge-run.v2edge-delay > span{ animation-delay:1.8s; }
   @keyframes v2loadY{ from{ transform:scaleY(0); } to{ transform:scaleY(1); } }
 }
 @media (prefers-reduced-motion: reduce){ .v2edge-run > span{ animation:none } }
