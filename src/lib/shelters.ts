@@ -77,20 +77,57 @@ export async function fetchMyShelter(
     .limit(1)
     .maybeSingle();
   if (error) throw error;
-  return (data ?? null) as Shelter | null;
+  if (!data) return null;
+
+  // Private fields live in shelter_contacts (owner-only RLS). A missing row
+  // just means the profile was created before 00036 — treat as empty.
+  const { data: contacts } = await supabase
+    .from("shelter_contacts")
+    .select("address, contact_email, contact_phone, lat, lng")
+    .eq("shelter_id", data.id)
+    .maybeSingle();
+  return {
+    ...data,
+    address: contacts?.address ?? null,
+    contact_email: contacts?.contact_email ?? null,
+    contact_phone: contacts?.contact_phone ?? null,
+    lat: contacts?.lat ?? data.lat ?? null,
+    lng: contacts?.lng ?? data.lng ?? null,
+  } as Shelter;
 }
 
 export async function upsertShelter(
   supabase: SupabaseClient<Database>,
   input: ShelterInput,
 ): Promise<Shelter> {
+  const { address, contact_email, contact_phone, lat, lng, ...pub } = input;
   const { data, error } = await supabase
     .from("shelters")
-    .upsert(input)
+    .upsert({ ...pub, lat: round2(lat ?? null), lng: round2(lng ?? null) })
     .select("*")
     .single();
   if (error) throw error;
-  return data as Shelter;
+
+  const { error: contactError } = await supabase.from("shelter_contacts").upsert({
+    shelter_id: data.id,
+    address: address ?? null,
+    contact_email: contact_email ?? null,
+    contact_phone: contact_phone ?? null,
+    lat: lat ?? null,
+    lng: lng ?? null,
+  });
+  // The public row is already saved; surfacing the error keeps the editor
+  // from claiming success while the owner's own view still shows old data.
+  if (contactError) throw contactError;
+
+  return {
+    ...data,
+    address: address ?? null,
+    contact_email: contact_email ?? null,
+    contact_phone: contact_phone ?? null,
+    lat: lat ?? null,
+    lng: lng ?? null,
+  } as Shelter;
 }
 
 export async function fetchWardsByRegion(
@@ -154,7 +191,20 @@ export async function sendShelterRequest(
   input: ShelterRequestInput,
 ): Promise<void> {
   const { error } = await supabase.from("sentinel_shelter_requests").insert(input);
-  if (error) throw error;
+  if (!error) return;
+
+  // The unique pair is intentional; reopen a declined request instead of
+  // making the visible "Bewerben" action fail forever.
+  if (error.code !== "23505") throw error;
+  const reopened = await supabase
+    .from("sentinel_shelter_requests")
+    .update({ message: input.message ?? null, status: "open", sentinel_hidden: false })
+    .eq("shelter_id", input.shelter_id)
+    .eq("sentinel_id", input.sentinel_id)
+    .eq("status", "declined")
+    .select("id")
+    .maybeSingle();
+  if (reopened.error || !reopened.data) throw error;
 }
 
 export async function setRequestStatus(

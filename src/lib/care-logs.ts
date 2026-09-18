@@ -3,6 +3,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import type { CareLog, CaseRecord, SentinelProfile } from "./dashboard-data";
+import { fetchEnclosures, parseEnclosures } from "./enclosures";
 import { parseCapacity, totalCapacity } from "./habitats";
 
 type Client = SupabaseClient<Database>;
@@ -163,11 +164,18 @@ export async function fetchLiveSentinelProfile(
         zip?: string;
         city?: string;
         phone?: string;
+        /** Anlagen from the application wizard; carried over until edited live. */
+        enclosures?: unknown;
       };
     } | null;
   } | null;
 
-  const total = app ? totalCapacity(parseCapacity(app.capacity)) : 0;
+  const capacityByHabitat = parseCapacity(app?.capacity);
+  const total = totalCapacity(capacityByHabitat);
+  const savedEnclosures = await fetchEnclosures(client, userId);
+  const enclosures = savedEnclosures.length > 0
+    ? savedEnclosures
+    : parseEnclosures(app?.pledge_data?.questionnaire?.enclosures);
   const q = app?.pledge_data?.questionnaire;
   const address = q && (q.street || q.house_number)
     ? `${q.street ?? ""} ${q.house_number ?? ""}, ${q.zip ?? ""} ${q.city ?? ""}`
@@ -184,7 +192,7 @@ export async function fetchLiveSentinelProfile(
     capacity: { used: wardCount, total },
     cases: [],
     certifications: [],
-    enclosures: [],
+    enclosures,
     insurance: { policy: "", coverEur: 0, validUntil: "" },
     vetOnCall: { name: "", phone: "" },
   };

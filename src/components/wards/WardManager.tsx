@@ -61,6 +61,12 @@ const urgencyTone: Record<string, string> = {
   critical: "bg-destructive/15 text-destructive",
 };
 
+const urgencyLabel: Record<string, string> = {
+  standard: "Standard",
+  urgent: "Erhöht",
+  critical: "Kritisch",
+};
+
 const statusLabel: Record<Ward["status"], string> = {
   available: "Verfügbar", under_review: "In Prüfung", placed: "Vermittelt", withdrawn: "Zurückgezogen",
 };
@@ -105,7 +111,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
   }, [user?.id, shelterId]);
 
   useEffect(() => {
-    const allPaths = Array.from(new Set(wards.flatMap((w) => w.images ?? [])));
+    const allPaths = Array.from(new Set(wards.flatMap((w) => (w.images ?? []).slice(0, 1))));
     const missing = allPaths.filter((p) => !signedUrls[p]);
     if (missing.length === 0) return;
     void (async () => {
@@ -120,6 +126,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
   const loadWards = async () => {
     let q = supabase.from("ward_listings").select("*").order("created_at", { ascending: false });
     if (shelterId) q = q.eq("shelter_id", shelterId);
+    q = q.limit(200);
     const { data, error } = await q;
     if (error) {
       toast({ title: "Fehler beim Laden", description: error.message, variant: "destructive" });
@@ -128,17 +135,29 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
     setWards((data ?? []) as Ward[]);
   };
 
-  const resetForm = () => { setForm(emptyForm); setPendingImages([]); setCarriedImages([]); };
+  const resetForm = () => {
+    setForm(emptyForm);
+    setRegState("");
+    setRegDistrict("");
+    setPendingImages([]);
+    setCarriedImages([]);
+  };
 
   const submitWard = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!user) return;
     setSubmitting(true);
     const uploadedPaths: string[] = [];
+    const cleanupUploads = async () => {
+      if (uploadedPaths.length > 0) {
+        await supabase.storage.from("ward-images").remove(uploadedPaths).catch(() => {});
+      }
+    };
     for (const file of pendingImages) {
       const img = await sniffImage(file);
       if (!img) {
         setSubmitting(false);
+        await cleanupUploads();
         toast({ title: "Ungültiges Bild", description: `${file.name}: nur JPG/PNG/WebP/GIF/AVIF bis 10 MB.`, variant: "destructive" });
         return;
       }
@@ -147,6 +166,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
         .from("ward-images").upload(path, file, { contentType: img.mime, upsert: false });
       if (upErr) {
         setSubmitting(false);
+        await cleanupUploads();
         toast({ title: "Bild-Upload fehlgeschlagen", description: upErr.message, variant: "destructive" });
         return;
       }
@@ -172,6 +192,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
     const { error } = await supabase.from("ward_listings").insert(payload);
     setSubmitting(false);
     if (error) {
+      await cleanupUploads();
       toast({ title: "Konnte nicht speichern", description: error.message, variant: "destructive" });
       return;
     }
@@ -193,7 +214,10 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
         <p className="font-mono text-xs text-muted-foreground">
           {myWards.length} {myWards.length === 1 ? "eigenes Tier" : "eigene Tiere"} erfasst
         </p>
-        <Button onClick={() => setShowForm(!showForm)} variant={showForm ? "outline" : "default"}>
+        <Button
+          onClick={() => { if (showForm) resetForm(); setShowForm(!showForm); }}
+          variant={showForm ? "outline" : "default"}
+        >
           <Plus className="mr-1 h-4 w-4" />
           {showForm ? "Abbrechen" : "Tier erfassen"}
         </Button>
@@ -210,7 +234,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
           <RegionSelect
             state={regState}
             district={regDistrict}
-            onState={(v) => { setRegState(v); update("region", regDistrict ? `${regDistrict}, ${v}` : v); }}
+            onState={(v) => { setRegState(v); setRegDistrict(""); update("region", v); }}
             onDistrict={(v) => { setRegDistrict(v); update("region", v ? `${v}, ${regState}` : regState); }}
           />
 
@@ -281,7 +305,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
         {myWards.map((w) => {
           const cover = (w.images ?? [])[0];
           return (
-            <article key={w.id} className="bg-background p-6">
+            <article key={w.id} className="bg-background p-6 transition-colors hover:bg-surface">
               {cover && (
                 <div className="mb-5 aspect-[16/10] w-full overflow-hidden border border-border bg-muted">
                   {signedUrls[cover]
@@ -297,7 +321,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
                   <h3 className="font-display mt-2 text-xl">{w.common_name}</h3>
                   {w.scientific_name && <p className="mt-1 text-xs italic text-muted-foreground">{w.scientific_name}</p>}
                 </div>
-                <Badge className={urgencyTone[w.urgency] ?? urgencyTone.standard}>{w.urgency}</Badge>
+                <Badge className={urgencyTone[w.urgency] ?? urgencyTone.standard}>{urgencyLabel[w.urgency] ?? w.urgency}</Badge>
               </div>
               <p className="mt-3 text-sm text-muted-foreground line-clamp-3">{w.background}</p>
               {w.region && (

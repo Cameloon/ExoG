@@ -8,13 +8,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/hooks/use-toast";
-import { ArrowLeft, ArrowRight, CheckCircle2, FileCheck2, MailCheck, Pencil, RefreshCw, ShieldCheck, Upload, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, FileCheck2, MailCheck, Pencil, Plus, RefreshCw, ShieldCheck, Upload, X } from "lucide-react";
 import { useUser, useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { EXTERNAL_CONFIG } from "@/config/external";
 import { useAuth } from "@/hooks/useAuth";
 import { RegionSelect } from "@/components/RegionSelect";
 import { BUNDESLAENDER } from "@/lib/germanRegions";
 import { HABITAT_CATEGORIES, parseCapacity, totalCapacity } from "@/lib/habitats";
+import { ENCLOSURE_STATUSES, ENCLOSURE_TYPES } from "@/lib/enclosures";
+import type { EnclosureSlot } from "@/lib/dashboard-data";
 
 // §11c TSchG: Abgabe an unter 16-Jährige nur mit Einwilligung der
 // Erziehungsberechtigten — für das Custody-Netzwerk heißt das: ab 16.
@@ -73,6 +75,7 @@ type FormState = {
   yearsKeeping: string; species: string; capacity: string;
   quarantine: "yes" | "partial" | "no" | ""; vetContact: string;
   enclosureSize: string; enclosureLighting: string; enclosureClimate: string; enclosureSetup: string;
+  enclosures: EnclosureSlot[];
   currentStock: string; feeding: string; overwintering: string;
   infoSources: string[]; sachkunde: "none" | "bna" | "dght" | "other" | ""; sachkundeDetail: string;
   motivation: string;
@@ -87,6 +90,7 @@ const initial: FormState = {
   yearsKeeping: "", species: "", capacity: "",
   quarantine: "", vetContact: "",
   enclosureSize: "", enclosureLighting: "", enclosureClimate: "", enclosureSetup: "",
+  enclosures: [],
   currentStock: "", feeding: "", overwintering: "",
   infoSources: [], sachkunde: "", sachkundeDetail: "",
   motivation: "",
@@ -212,6 +216,35 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
     setErrors((e) => ({ ...e, [key]: "" }));
   };
 
+  // Anlagen (step 3) are optional; when present each needs a unique Kürzel.
+  const enclosureError = (list: EnclosureSlot[]): string => {
+    if (list.length > 50) return "Maximal 50 Anlagen.";
+    if (list.some((e) => !e.id.trim())) return "Jede Anlage braucht ein Kürzel.";
+    const codes = list.map((e) => e.id.trim());
+    if (codes.some((c) => c.length > 12)) return "Kürzel max. 12 Zeichen.";
+    if (new Set(codes).size !== codes.length) return "Kürzel doppelt vergeben.";
+    return "";
+  };
+
+  const addEnclosure = () => {
+    let n = data.enclosures.length + 1;
+    let code = `T-${String(n).padStart(2, "0")}`;
+    while (data.enclosures.some((e) => e.id === code)) {
+      n += 1;
+      code = `T-${String(n).padStart(2, "0")}`;
+    }
+    update("enclosures", [
+      ...data.enclosures,
+      { id: code, type: "Terrarium-Trocken", sizeCm: "", status: "frei" },
+    ]);
+  };
+
+  const patchEnclosure = (index: number, patch: Partial<EnclosureSlot>) =>
+    update("enclosures", data.enclosures.map((e, i) => (i === index ? { ...e, ...patch } : e)));
+
+  const removeEnclosure = (index: number) =>
+    update("enclosures", data.enclosures.filter((_, i) => i !== index));
+
   const validateStep = (n: number): boolean => {
     if (n === 4) {
       if (!docs.id_front || !docs.id_back || !docs.selfie) { setDocError(t("onboarding.docs.required")); return false; }
@@ -229,6 +262,10 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
     }
     if (n === 3 && data.sachkunde === "other" && data.sachkundeDetail.trim().length < 2) {
       next.sachkundeDetail = "Welcher Sachkundenachweis?";
+    }
+    if (n === 3) {
+      const encErr = enclosureError(data.enclosures);
+      if (encErr) next.enclosures = encErr;
     }
     if (Object.keys(next).length > 0) { setErrors(next); return false; }
     return true;
@@ -260,11 +297,17 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
     if (data.sachkunde === "other" && data.sachkundeDetail.trim().length < 2) {
       next.sachkundeDetail = "Welcher Sachkundenachweis?";
     }
+    const encErr = enclosureError(data.enclosures);
+    if (encErr) next.enclosures = encErr;
     if (Object.keys(next).length > 0) {
       setErrors(next);
-      for (const s of steps) {
-        const fields = fieldsByStep[s.id];
-        if (fields.some((f) => next[f as string])) { setStep(s.id); break; }
+      if (next.enclosures) {
+        setStep(3);
+      } else {
+        for (const s of steps) {
+          const fields = fieldsByStep[s.id];
+          if (fields.some((f) => next[f as string])) { setStep(s.id); break; }
+        }
       }
       toast({ title: "Bitte alle Felder prüfen", variant: "destructive" });
       return;
@@ -298,6 +341,12 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
             climate: data.enclosureClimate,
             setup: data.enclosureSetup,
           },
+          enclosures: data.enclosures.map((e) => ({
+            id: e.id.trim(),
+            type: e.type,
+            sizeCm: e.sizeCm.trim(),
+            status: e.status,
+          })),
           current_stock: data.currentStock,
           feeding: data.feeding,
           overwintering: data.overwintering,
@@ -468,7 +517,7 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
             <RegionSelect
               state={regState}
               district={regDistrict}
-              onState={(v) => { setRegState(v); update("region", regDistrict ? `${regDistrict}, ${v}` : v); }}
+              onState={(v) => { setRegState(v); setRegDistrict(""); update("region", v); }}
               onDistrict={(v) => { setRegDistrict(v); update("region", v ? `${v}, ${regState}` : regState); }}
             />
             <div className="grid grid-cols-[1fr_120px] gap-4">
@@ -564,6 +613,53 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
                 </Field>
               </div>
               <p className="mt-2 text-xs text-muted-foreground">Fotos deiner Anlage lädst du in Schritt 4 (Dokumente) hoch.</p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Deine Anlagen</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Optional: einzelne Terrarien/Freigehege mit Kürzel, Typ, Maßen und Status — sie erscheinen
+                nach der Freigabe direkt in deiner Kapazitäts-Übersicht.
+              </p>
+              <div className="mt-3 space-y-2">
+                {data.enclosures.map((enc, i) => (
+                  <div key={i} className="grid grid-cols-2 gap-2 border border-border bg-background p-3 sm:grid-cols-[110px_1fr_1fr_110px_36px]">
+                    <Input value={enc.id} onChange={(e) => patchEnclosure(i, { id: e.target.value })} maxLength={12} placeholder="Kürzel" className="h-9 font-mono text-xs" />
+                    <select
+                      value={enc.type}
+                      onChange={(e) => patchEnclosure(i, { type: e.target.value as EnclosureSlot["type"] })}
+                      className="h-9 border border-border bg-background px-2 font-mono text-xs"
+                    >
+                      {ENCLOSURE_TYPES.map((tp) => (
+                        <option key={tp} value={tp}>{tp}</option>
+                      ))}
+                    </select>
+                    <Input value={enc.sizeCm} onChange={(e) => patchEnclosure(i, { sizeCm: e.target.value })} maxLength={40} placeholder="L×B×H in cm" className="h-9 font-mono text-xs" />
+                    <select
+                      value={enc.status}
+                      onChange={(e) => patchEnclosure(i, { status: e.target.value as EnclosureSlot["status"] })}
+                      className="h-9 border border-border bg-background px-2 font-mono text-xs uppercase"
+                    >
+                      {ENCLOSURE_STATUSES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => removeEnclosure(i)}
+                      aria-label="Anlage entfernen"
+                      className="flex h-9 w-9 items-center justify-center border border-border text-muted-foreground transition-colors hover:text-destructive"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex items-center gap-3">
+                <Button type="button" variant="outline" size="sm" onClick={addEnclosure} disabled={data.enclosures.length >= 50}>
+                  <Plus className="mr-1.5 h-4 w-4" /> Anlage hinzufügen
+                </Button>
+                {errors.enclosures && <p className="text-xs text-destructive">{errors.enclosures}</p>}
+              </div>
             </div>
             <Field label="Vorhandener Tierbesatz" error={errors.currentStock} hint="Arten, Anzahl, Geschlecht — leer lassen, wenn keine">
               <Textarea rows={2} value={data.currentStock} onChange={(e) => update("currentStock", e.target.value)} maxLength={500} />
@@ -665,6 +761,7 @@ export const SentinelWizard = ({ variant = "embedded" }: { variant?: "embedded" 
               ["Beleuchtung", data.enclosureLighting],
               ["Temperatur/rF", data.enclosureClimate],
               ["Einrichtung", data.enclosureSetup],
+              ["Anlagen", data.enclosures.length ? data.enclosures.map((e) => `${e.id.trim()} (${e.type})`).join(", ") : "keine"],
               ["Tierbesatz", data.currentStock || "keiner"],
               ["Fütterung", data.feeding],
               ["Überwinterung", data.overwintering || "—"],

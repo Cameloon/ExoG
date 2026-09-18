@@ -17,7 +17,7 @@ import {
   AlertCircle,
   Download,
 } from "lucide-react";
-import { CASES, CARE_LOGS, ME_SENTINEL, DUTIES, ACTIVITY_7D, type CareLog, type Duty, type DutyPriority, type SentinelProfile } from "@/lib/dashboard-data";
+import { CASES, CARE_LOGS, ME_SENTINEL, DUTIES, ACTIVITY_7D, type CareLog, type Duty, type DutyPriority, type EnclosureSlot, type SentinelProfile } from "@/lib/dashboard-data";
 import { RATIONALE_RULES, validateRationale, sign } from "@/lib/care-log-validation";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -30,6 +30,7 @@ import {
   wardToCase,
   type WardRow,
 } from "@/lib/care-logs";
+import { capacityFromEnclosures, saveEnclosures } from "@/lib/enclosures";
 import { addDuty as persistDuty, fetchActivity7d, fetchDuties, formatDue, setDutyDone } from "@/lib/duties";
 import { DocumentsHub } from "./DocumentsHub";
 import { SentinelOverview } from "./SentinelOverview";
@@ -98,6 +99,16 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
         setLiveDuties((prev) => prev.map((d) => (d.id === id ? { ...d, done: before } : d)));
         toast({ title: "Pflicht nicht gespeichert", description: (e as Error).message, variant: "destructive" });
       });
+  };
+
+  const handleSaveEnclosures = (next: EnclosureSlot[]) => {
+    if (!live || !user) return;
+    const before = liveSentinel.enclosures;
+    setLiveSentinel((s) => ({ ...s, enclosures: next }));
+    void saveEnclosures(supabase, user.id, next).catch((e) => {
+      setLiveSentinel((s) => ({ ...s, enclosures: before }));
+      toast({ title: "Anlagen nicht gespeichert", description: (e as Error).message, variant: "destructive" });
+    });
   };
 
   const handleAddDuty = (input: { title: string; caseId?: string; dueIso: string; priority: DutyPriority; category: Duty["category"] }) => {
@@ -315,7 +326,9 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
   const validation = useMemo(() => validateRationale(type, rationale, undefined), [type, rationale]);
 
 
-  const capPct = sentinel.capacity.total > 0 ? (sentinel.capacity.used / sentinel.capacity.total) * 100 : 0;
+  // Enclosure slots are the real capacity once maintained.
+  const cap = capacityFromEnclosures(sentinel.enclosures) ?? sentinel.capacity;
+  const capPct = cap.total > 0 ? (cap.used / cap.total) * 100 : 0;
 
   // ponytail: block render until live data arrives to avoid demo-flash
   if (live && booting) {
@@ -352,8 +365,8 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
             </span>
           </div>
           <div className="mt-6 font-display text-4xl tracking-tight">
-            {sentinel.capacity.used}
-            <span className="text-muted-foreground">/{sentinel.capacity.total}</span>
+            {cap.used}
+            <span className="text-muted-foreground">/{cap.total}</span>
           </div>
           <div className="mt-2 h-1 w-full bg-border">
             <div className="h-full bg-primary" style={{ width: `${capPct}%` }} />
@@ -415,6 +428,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
             onToggleDuty={handleToggleDuty}
             onAddDuty={handleAddDuty}
             onJumpToCase={jumpToCase}
+            onSaveEnclosures={live ? handleSaveEnclosures : undefined}
             live={live}
           />
         </div>

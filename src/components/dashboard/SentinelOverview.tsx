@@ -12,6 +12,7 @@ import {
   Filter,
   Mail,
   MapPin,
+  Pencil,
   Phone,
   Plus,
   ShieldCheck,
@@ -31,9 +32,11 @@ import {
   type CaseRecord,
   type Duty,
   type DutyPriority,
+  type EnclosureSlot,
   type SentinelProfile,
 } from "@/lib/dashboard-data";
 import { formatDue } from "@/lib/duties";
+import { ENCLOSURE_STATUSES, ENCLOSURE_TYPES, capacityFromEnclosures } from "@/lib/enclosures";
 
 type DutyCategory = Duty["category"];
 const CATEGORIES: DutyCategory[] = [
@@ -87,15 +90,21 @@ interface Props {
   onToggleDuty: (id: string, done: boolean) => void;
   onAddDuty: (d: { title: string; caseId?: string; dueIso: string; priority: DutyPriority; category: Duty["category"] }) => void;
   onJumpToCase: (id: string) => void;
+  /** Live only: persist the enclosure list (demo stays static without it). */
+  onSaveEnclosures?: (next: EnclosureSlot[]) => void;
   live?: boolean;
 }
 
-export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDuty, onAddDuty, onJumpToCase, live = false }: Props) => {
+export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDuty, onAddDuty, onJumpToCase, onSaveEnclosures, live = false }: Props) => {
   const [newDuty, setNewDuty] = useState("");
   const [newCategory, setNewCategory] = useState<DutyCategory>("Klima");
   const [newPriority, setNewPriority] = useState<DutyPriority>("normal");
   const [newCaseId, setNewCaseId] = useState<string>(NONE_CASE);
   const [newDueIso, setNewDueIso] = useState<string>(defaultDueIso());
+
+  const canManageEnclosures = Boolean(onSaveEnclosures);
+  const [editor, setEditor] = useState<{ slot: EnclosureSlot; originalId: string | null } | null>(null);
+  const [editorError, setEditorError] = useState<string | null>(null);
 
   // Filter & Sort states
   const [filterCaseId, setFilterCaseId] = useState<string>(ALL_CASE);
@@ -185,8 +194,45 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
   };
 
   const initials = sentinel.name.split(/\s+/).map((p) => p[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "S";
-  const capTotal = sentinel.capacity.total;
-  const capPct = capTotal > 0 ? Math.round((sentinel.capacity.used / capTotal) * 100) : 0;
+  // Enclosure slots are the real capacity once maintained; application totals
+  // remain the fallback until the sentinel creates their first Anlage.
+  const cap = capacityFromEnclosures(sentinel.enclosures) ?? sentinel.capacity;
+  const capTotal = cap.total;
+  const capPct = capTotal > 0 ? Math.min(100, Math.round((cap.used / capTotal) * 100)) : 0;
+
+  const openNewEnclosure = () => {
+    setEditorError(null);
+    setEditor({ slot: { id: "", type: "Terrarium-Trocken", sizeCm: "", status: "frei" }, originalId: null });
+  };
+
+  const openEnclosure = (slot: EnclosureSlot) => {
+    setEditorError(null);
+    setEditor({ slot, originalId: slot.id });
+  };
+
+  const commitEnclosure = () => {
+    if (!editor || !onSaveEnclosures) return;
+    const code = editor.slot.id.trim();
+    if (!code) return setEditorError("Kürzel angeben.");
+    if (sentinel.enclosures.some((e) => e.id === code && e.id !== editor.originalId)) {
+      return setEditorError("Kürzel bereits vergeben.");
+    }
+    const slot: EnclosureSlot = {
+      ...editor.slot,
+      id: code,
+      sizeCm: editor.slot.sizeCm.trim(),
+      occupiedBy: editor.slot.status === "belegt" ? editor.slot.occupiedBy : undefined,
+    };
+    onSaveEnclosures(
+      editor.originalId === null
+        ? [...sentinel.enclosures, slot]
+        : sentinel.enclosures.map((e) => (e.id === editor.originalId ? slot : e)),
+    );
+    setEditor(null);
+  };
+
+  const deleteEnclosure = (id: string) =>
+    onSaveEnclosures?.(sentinel.enclosures.filter((e) => e.id !== id));
 
   return (
     <div className="grid gap-8 lg:grid-cols-12">
@@ -286,49 +332,81 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
       <div className="lg:col-span-8 space-y-8">
         {/* Kapazitäts-Visualizer */}
         <section className="border border-border bg-surface">
-          <div className="flex items-baseline justify-between border-b border-border p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-6">
             <div>
               <span className="eyebrow">Kapazitäten · Anlagen</span>
               <h3 className="mt-2 text-xl tracking-tight">
-                {sentinel.capacity.used} von {sentinel.capacity.total} Plätzen belegt
+                {cap.used} von {cap.total} Plätzen belegt
               </h3>
             </div>
-            {capTotal > 0 && (
-              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
-                {capPct}% Auslastung
-              </span>
-            )}
+            <div className="flex items-center gap-3">
+              {capTotal > 0 && (
+                <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
+                  {capPct}% Auslastung
+                </span>
+              )}
+              {canManageEnclosures && (
+                <Button size="sm" variant="outline" onClick={openNewEnclosure}>
+                  <Plus className="mr-1.5 h-4 w-4" /> Anlage
+                </Button>
+              )}
+            </div>
           </div>
 
-          {/* Slot-Grid (demo has real enclosures; live shows it once they exist) */}
-          {sentinel.enclosures.length > 0 && (
+          {editor && (
+            <EnclosureEditor
+              slot={editor.slot}
+              isNew={editor.originalId === null}
+              cases={cases}
+              error={editorError}
+              onChange={(slot) => setEditor((prev) => (prev ? { ...prev, slot } : prev))}
+              onCancel={() => setEditor(null)}
+              onCommit={commitEnclosure}
+              onDelete={() => {
+                if (editor.originalId) deleteEnclosure(editor.originalId);
+                setEditor(null);
+              }}
+            />
+          )}
+
+          {sentinel.enclosures.length > 0 ? (
             <>
               <div className="grid grid-cols-3 gap-px bg-border md:grid-cols-6">
                 {sentinel.enclosures.map((e) => (
-                  <button
-                    key={e.id}
-                    onClick={() => e.occupiedBy && onJumpToCase(e.occupiedBy)}
-                    disabled={!e.occupiedBy}
-                    className={`group relative flex flex-col bg-surface p-4 text-left transition-colors ${
-                      e.occupiedBy ? "hover:bg-surface-elevated" : "cursor-default"
-                    }`}
-                  >
-                    <span
-                      className={`inline-flex h-5 w-fit items-center px-1.5 font-mono text-[9px] uppercase tracking-[0.18em] ${ENCLOSURE_TONE[e.status]}`}
+                  <div key={e.id} className="group relative bg-surface">
+                    <button
+                      onClick={() => e.occupiedBy && onJumpToCase(e.occupiedBy)}
+                      disabled={!e.occupiedBy}
+                      className={`flex h-full w-full flex-col p-4 text-left transition-colors ${
+                        e.occupiedBy ? "hover:bg-surface-elevated" : "cursor-default"
+                      }`}
                     >
-                      {e.status}
-                    </span>
-                    <span className="mt-3 font-display text-lg">{e.id}</span>
-                    <span className="mt-0.5 text-[11px] text-muted-foreground">{e.type}</span>
-                    <span className="mt-1 font-mono text-[10px] text-muted-foreground">
-                      {e.sizeCm} cm
-                    </span>
-                    {e.occupiedBy && (
-                      <span className="mt-2 font-mono text-[10px] text-primary">
-                        {e.occupiedBy}
+                      <span
+                        className={`inline-flex h-5 w-fit items-center px-1.5 font-mono text-[9px] uppercase tracking-[0.18em] ${ENCLOSURE_TONE[e.status]}`}
+                      >
+                        {e.status}
                       </span>
+                      <span className="mt-3 font-display text-lg">{e.id}</span>
+                      <span className="mt-0.5 text-[11px] text-muted-foreground">{e.type}</span>
+                      <span className="mt-1 font-mono text-[10px] text-muted-foreground">
+                        {e.sizeCm} cm
+                      </span>
+                      {e.occupiedBy && (
+                        <span className="mt-2 font-mono text-[10px] text-primary">
+                          {e.occupiedBy}
+                        </span>
+                      )}
+                    </button>
+                    {canManageEnclosures && (
+                      <button
+                        onClick={() => openEnclosure(e)}
+                        aria-label={`Anlage ${e.id} bearbeiten`}
+                        className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
                     )}
-                  </button>
+                  </div>
                 ))}
               </div>
 
@@ -358,6 +436,15 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
                 </ul>
               </div>
             </>
+          ) : (
+            <div className="border-t border-border p-6">
+              <p className="text-sm text-muted-foreground">Noch keine Anlagen hinterlegt.</p>
+              {canManageEnclosures && (
+                <Button size="sm" variant="outline" className="mt-4" onClick={openNewEnclosure}>
+                  <Plus className="mr-1.5 h-4 w-4" /> Erste Anlage anlegen
+                </Button>
+              )}
+            </div>
           )}
         </section>
 
@@ -680,6 +767,132 @@ const DutyGroup = ({ label, icon, duties, onToggle, onJumpToCase, caseLabel }: D
           </li>
         ))}
       </ul>
+    </div>
+  );
+};
+
+interface EnclosureEditorProps {
+  slot: EnclosureSlot;
+  isNew: boolean;
+  cases: CaseRecord[];
+  error: string | null;
+  onChange: (slot: EnclosureSlot) => void;
+  onCancel: () => void;
+  onCommit: () => void;
+  onDelete: () => void;
+}
+
+const EnclosureEditor = ({ slot, isNew, cases, error, onChange, onCancel, onCommit, onDelete }: EnclosureEditorProps) => {
+  const fieldLabel = "font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground";
+  return (
+    <div className="space-y-3 border-b border-border bg-background/40 p-6">
+      <div className="flex items-baseline justify-between">
+        <span className="eyebrow">{isNew ? "Neue Anlage" : `Anlage ${slot.id} bearbeiten`}</span>
+        <button onClick={onCancel} aria-label="Abbrechen" className="text-muted-foreground hover:text-foreground">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="space-y-1">
+          <span className={fieldLabel}>Kürzel</span>
+          <Input
+            value={slot.id}
+            onChange={(e) => onChange({ ...slot, id: e.target.value })}
+            placeholder="T-07"
+            maxLength={12}
+            className="h-9 border-border bg-background font-mono text-sm"
+          />
+        </label>
+        <label className="space-y-1">
+          <span className={fieldLabel}>Anlagentyp</span>
+          <Select value={slot.type} onValueChange={(v) => onChange({ ...slot, type: v as EnclosureSlot["type"] })}>
+            <SelectTrigger className="h-9 border-border bg-background font-mono text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ENCLOSURE_TYPES.map((t) => (
+                <SelectItem key={t} value={t} className="font-mono text-xs">
+                  {t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="space-y-1">
+          <span className={fieldLabel}>Maße</span>
+          <Input
+            value={slot.sizeCm}
+            onChange={(e) => onChange({ ...slot, sizeCm: e.target.value })}
+            placeholder="L×B×H in cm"
+            maxLength={40}
+            className="h-9 border-border bg-background font-mono text-sm"
+          />
+        </label>
+        <label className="space-y-1">
+          <span className={fieldLabel}>Status</span>
+          <Select
+            value={slot.status}
+            onValueChange={(v) => {
+              const status = v as EnclosureSlot["status"];
+              onChange({ ...slot, status, occupiedBy: status === "belegt" ? slot.occupiedBy : undefined });
+            }}
+          >
+            <SelectTrigger className="h-9 border-border bg-background font-mono text-xs uppercase">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ENCLOSURE_STATUSES.map((s) => (
+                <SelectItem key={s} value={s} className="font-mono text-xs uppercase">
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="space-y-1 sm:col-span-2">
+          <span className={fieldLabel}>Belegung</span>
+          <Select
+            value={slot.occupiedBy ?? NONE_CASE}
+            onValueChange={(v) => {
+              const occupiedBy = v === NONE_CASE ? undefined : v;
+              onChange({ ...slot, occupiedBy, status: occupiedBy ? "belegt" : slot.status });
+            }}
+          >
+            <SelectTrigger className="h-9 border-border bg-background font-mono text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE_CASE} className="font-mono text-xs">
+                — frei —
+              </SelectItem>
+              {cases.map((c) => (
+                <SelectItem key={c.id} value={c.id} className="font-mono text-xs">
+                  {c.id} · {c.german}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+      </div>
+      {error && <p className="font-mono text-[11px] text-destructive">{error}</p>}
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={onCommit}>
+          <Check className="mr-1.5 h-4 w-4" /> Speichern
+        </Button>
+        {!isNew && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive hover:text-destructive"
+            onClick={onDelete}
+          >
+            Löschen
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Abbrechen
+        </Button>
+      </div>
     </div>
   );
 };

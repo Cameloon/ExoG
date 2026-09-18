@@ -273,6 +273,8 @@ export type Database = {
           created_at: string
           display_name: string | null
           email: string | null
+          // ponytail: hand-added (00035_enclosures.sql)
+          enclosures: Json
           id: string
           preferred_language: string | null
           // ponytail: hand-added (00019_profiles_region.sql)
@@ -283,6 +285,7 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           email?: string | null
+          enclosures?: Json
           id: string
           preferred_language?: string | null
           region?: string | null
@@ -292,6 +295,7 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           email?: string | null
+          enclosures?: Json
           id?: string
           preferred_language?: string | null
           region?: string | null
@@ -637,6 +641,45 @@ export type Database = {
         }
         Relationships: []
       }
+      // ponytail: hand-added (00036_shelter_directory_invoker.sql)
+      shelter_contacts: {
+        Row: {
+          address: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          lat: number | null
+          lng: number | null
+          shelter_id: string
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          contact_email?: string | null
+          contact_phone?: string | null
+          lat?: number | null
+          lng?: number | null
+          shelter_id: string
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          contact_email?: string | null
+          contact_phone?: string | null
+          lat?: number | null
+          lng?: number | null
+          shelter_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shelter_contacts_shelter_id_fkey"
+            columns: ["shelter_id"]
+            isOneToOne: true
+            referencedRelation: "shelters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shelters: {
         Row: {
           id: string
@@ -644,11 +687,8 @@ export type Database = {
           name: string
           kind: Database["public"]["Enums"]["user_kind"]
           region: string
-          address: string | null
           lat: number | null
           lng: number | null
-          contact_email: string | null
-          contact_phone: string | null
           description: string | null
           capacity_notes: string | null
           created_at: string
@@ -660,11 +700,8 @@ export type Database = {
           name: string
           kind?: Database["public"]["Enums"]["user_kind"]
           region: string
-          address?: string | null
           lat?: number | null
           lng?: number | null
-          contact_email?: string | null
-          contact_phone?: string | null
           description?: string | null
           capacity_notes?: string | null
           created_at?: string
@@ -676,11 +713,8 @@ export type Database = {
           name?: string
           kind?: Database["public"]["Enums"]["user_kind"]
           region?: string
-          address?: string | null
           lat?: number | null
           lng?: number | null
-          contact_email?: string | null
-          contact_phone?: string | null
           description?: string | null
           capacity_notes?: string | null
           created_at?: string

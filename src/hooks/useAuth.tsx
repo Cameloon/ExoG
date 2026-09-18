@@ -8,8 +8,8 @@
  * - `user.id`     → Clerk user id (string, e.g. "user_2abc...")
  * - `user.email`  → primary email
  *
- * Admin role is determined by reading the `public_metadata.role`
- * field on the Clerk user (set it to "admin" in the Clerk dashboard).
+ * Admin role is read from Clerk metadata or the database role table, matching
+ * the setup runbook and the RLS policies.
  */
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { useUser, useClerk, useAuth as useClerkAuth } from "@clerk/clerk-react";
@@ -138,6 +138,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [approvedShelter, setApprovedShelter] = useState(false);
   const [sentinelApproved, setSentinelApproved] = useState(false);
   const [sentinelTier, setSentinelTier] = useState<string | null>(null);
+  const [databaseAdmin, setDatabaseAdmin] = useState(false);
   const [accessLoading, setAccessLoading] = useState(true);
 
   useEffect(() => {
@@ -146,6 +147,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setApprovedShelter(false);
       setSentinelApproved(false);
       setSentinelTier(null);
+      setDatabaseAdmin(false);
       setAccessLoading(false);
       return;
     }
@@ -164,14 +166,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
         return [];
       };
-      const [shelterRows, sentinelRows] = await Promise.all([
+      const readDatabaseAdmin = async () => {
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const result = await supabase
+            .from("user_roles")
+            .select("role")
+            .eq("user_id", clerkUser.id)
+            .eq("role", "admin")
+            .limit(1);
+          if (!result.error) return (result.data?.length ?? 0) > 0;
+          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        }
+        return false;
+      };
+      const [shelterRows, sentinelRows, isDatabaseAdmin] = await Promise.all([
         read("pending_shelter_requests"),
         read("sentinel_applications"),
+        readDatabaseAdmin(),
       ]);
       if (cancelled) return;
       setApprovedShelter(shelterRows.length > 0);
       setSentinelApproved(sentinelRows.length > 0 || meta?.role === "sentinel");
       setSentinelTier((sentinelRows as { tier?: string | null }[])[0]?.tier ?? null);
+      setDatabaseAdmin(isDatabaseAdmin);
       setAccessLoading(false);
     })();
     return () => { cancelled = true; };
@@ -200,7 +217,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       region?: string;
     } | null;
     const role = meta?.role;
-    const isAdmin = role === "admin";
+    const isAdmin = role === "admin" || databaseAdmin;
     const isBehoerde = role === "behoerde" || role === "gov";
     // A sentinel may be approved for shelter-network membership too; that must
     // NOT flip them to einrichtung — the approved-shelter fallback only
@@ -242,7 +259,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         await clerk.signOut();
       },
     };
-  }, [userLoaded, authLoaded, clerkUser, clerk, approvedShelter, sentinelApproved, sentinelTier, profileRegion, accessLoading, profileRegionLoading]);
+  }, [userLoaded, authLoaded, clerkUser, clerk, approvedShelter, sentinelApproved, sentinelTier, databaseAdmin, profileRegion, accessLoading, profileRegionLoading]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 

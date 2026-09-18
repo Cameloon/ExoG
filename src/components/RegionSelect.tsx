@@ -27,7 +27,7 @@ export const RegionSelect = ({
         <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{stateLabel}</Label>
         <select
           value={state}
-          onChange={(e) => { onState(e.target.value); onDistrict(""); }}
+          onChange={(e) => onState(e.target.value)}
           required={required}
           className="mt-2 h-10 w-full border border-border bg-background px-3 text-sm"
         >

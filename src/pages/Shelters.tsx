@@ -16,13 +16,12 @@ import { RegionSelect } from "@/components/RegionSelect";
 import {
   fetchMyShelter,
   upsertShelter,
-  fetchShelterWards,
   fetchRequestsForShelter,
   setRequestStatus,
   deleteShelterRequest,
 } from "@/lib/shelters";
 import { parseCapacity, totalCapacity } from "@/lib/habitats";
-import type { Shelter, Ward, ShelterRequest, WardInterest } from "@/lib/types";
+import type { Shelter, ShelterRequest, WardInterest } from "@/lib/types";
 import { BUNDESLAENDER } from "@/lib/germanRegions";
 import { fetchWardInterests, setInterestStatus } from "@/lib/shelters";
 import { QuestionnaireBlock } from "@/components/QuestionnaireBlock";
@@ -58,7 +57,6 @@ const Shelters = () => {
   const { toast } = useToast();
   const [tab, setTab] = useState<Tab>("profil");
   const [shelter, setShelter] = useState<Shelter | null>(null);
-  const [wards, setWards] = useState<Ward[]>([]);
   const [requests, setRequests] = useState<ShelterRequest[]>([]);
   const [interests, setInterests] = useState<WardInterest[]>([]);
   const [applicants, setApplicants] = useState<Record<string, ApplicantApp>>({});
@@ -111,12 +109,10 @@ const Shelters = () => {
       const s = await fetchMyShelter(supabase, user.id);
       setShelter(s);
       if (s) {
-        const [w, r, i] = await Promise.all([
-          fetchShelterWards(supabase, s.id),
+        const [r, i] = await Promise.all([
           fetchRequestsForShelter(supabase, s.id),
           fetchWardInterests(supabase, s.id),
         ]);
-        setWards(w);
         setRequests(r);
         setInterests(i);
         // Klarname + Profil der Bewerber (RLS 00017 + 00024: shelter reads
@@ -597,7 +593,7 @@ const ShelterProfileForm = ({
       <RegionSelect
         state={state}
         district={district}
-        onState={setState}
+        onState={(v) => { setState(v); setDistrict(""); }}
         onDistrict={setDistrict}
       />
       <Field label="Adresse" value={address} onChange={setAddress} />

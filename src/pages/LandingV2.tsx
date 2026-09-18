@@ -436,39 +436,50 @@ export const LandingV2 = () => {
                 <Fragment key={s.n}>
                   {i > 0 && (
                     // lg:pt-73px = Button-Mitte (h-148), nicht Spalten-Mitte
-                    <li aria-hidden="true" className="flex justify-center lg:flex-1 lg:items-start lg:pt-[73px]">
-                      <span className={`v2edge h-6 w-[2px] lg:h-[2px] lg:w-full ${i <= step ? "v2edge-done" : i === step + 1 ? "v2edge-run" : ""}`}>
+                    <li aria-hidden="true" className="hidden lg:flex lg:flex-1 lg:items-start lg:pt-[73px]">
+                      <span className={`v2edge h-[2px] w-full ${i <= step ? "v2edge-done" : i === step + 1 ? "v2edge-run" : ""}`}>
                         <span key={`${audience}-${step}`} />
                       </span>
                     </li>
                   )}
-                  <li className="lg:flex lg:w-48 lg:shrink-0 lg:flex-col">
-                    <button
-                      type="button"
-                      onClick={() => setStep(i)}
-                      aria-pressed={step === i}
-                      aria-label={`Schritt ${s.n}: ${s.title}`}
-                      aria-expanded={step === i}
-                      className={`v2node flex w-full items-center gap-3 p-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-[148px] lg:flex-col lg:items-stretch lg:justify-between ${i === step ? "v2node-on" : ""}`}
-                    >
-                      <span className="flex items-center justify-between gap-2">
-                        <span className={`font-mono text-[11px] ${i <= step ? "v2a" : "text-muted-foreground"}`}>{s.n}</span>
-                        {i < step ? (
-                          <Check className="h-3.5 w-3.5 v2a" aria-hidden />
-                        ) : i === step ? (
-                          <span className="h-2 w-2 v2ab animate-pulse-dot" aria-hidden />
-                        ) : (
-                          <span className="h-2 w-2 border border-border" aria-hidden />
-                        )}
-                      </span>
-                      <span>
-                        <span className="flex items-center gap-2 text-sm font-semibold leading-snug">
-                          {s.icon ? <s.icon className="h-4 w-4 shrink-0 v2a" aria-hidden /> : null}
-                          {s.title}
+                  <li className="grid grid-cols-[10rem_minmax(0,1fr)] gap-x-4 lg:flex lg:w-48 lg:shrink-0 lg:flex-col">
+                    {/* mobil: Node links, Text rechts, senkrechter Strich unter dem Node */}
+                    <div className="flex flex-col">
+                      <button
+                        type="button"
+                        onClick={() => setStep(i)}
+                        aria-pressed={step === i}
+                        aria-label={`Schritt ${s.n}: ${s.title}`}
+                        aria-expanded={step === i}
+                        className={`v2node flex w-full flex-col items-stretch justify-between gap-3 p-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-[148px] ${i === step ? "v2node-on" : ""}`}
+                      >
+                        <span className="flex items-center justify-between gap-2">
+                          <span className={`font-mono text-[11px] ${i <= step ? "v2a" : "text-muted-foreground"}`}>{s.n}</span>
+                          {i < step ? (
+                            <Check className="h-3.5 w-3.5 v2a" aria-hidden />
+                          ) : i === step ? (
+                            <span className="h-2 w-2 v2ab animate-pulse-dot" aria-hidden />
+                          ) : (
+                            <span className="h-2 w-2 border border-border" aria-hidden />
+                          )}
                         </span>
-                        <span className="mt-1.5 block font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">{s.time}</span>
-                      </span>
-                    </button>
+                        <span>
+                          <span className="flex items-center gap-2 text-sm font-semibold leading-snug">
+                            {s.icon ? <s.icon className="h-4 w-4 shrink-0 v2a" aria-hidden /> : null}
+                            {s.title}
+                          </span>
+                          <span className="mt-1.5 block font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">{s.time}</span>
+                        </span>
+                      </button>
+                      {i < flow.length - 1 && (
+                        <span
+                          aria-hidden="true"
+                          className={`v2edge mx-auto mt-2 min-h-6 w-[2px] grow lg:!hidden ${i < step ? "v2edge-done" : i === step ? "v2edge-run" : ""}`}
+                        >
+                          <span key={`${audience}-${step}`} />
+                        </span>
+                      )}
+                    </div>
                     {/*
                       Slot immer rendern, inaktiv unsichtbar aber platzhaltend:
                       jede Spalte ist gleich hoch, die Sektion springt nie.

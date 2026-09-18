@@ -20,7 +20,8 @@ where to_regclass('public.profiles') is not null
   and to_regclass('public.change_log') is not null
   and to_regclass('public.role_change_log') is not null
   and to_regclass('public.sentinel_change_requests') is not null
-  and to_regclass('public.shelter_directory') is not null;
+  and to_regclass('public.shelter_directory') is not null
+  and to_regclass('public.shelter_contacts') is not null;
 
 -- 2) RLS enabled on all custody tables
 select 'ok' as result
@@ -31,7 +32,7 @@ where n.nspname = 'public'
                     'ward_listings','ward_interest','shelters','sentinel_shelter_requests',
                     'pending_shelter_requests','care_logs','identification_requests',
                     'identification_votes','transport_logs','change_log','role_change_log',
-                    'sentinel_change_requests')
+                    'sentinel_change_requests','shelter_contacts')
   and not c.relrowsecurity;
 
 -- (expect 0 rows)

@@ -49,6 +49,7 @@ type AccessState =
   | { kind: "no_application" }
   | { kind: "pending" }
   | { kind: "rejected" }
+  | { kind: "error" }
   | { kind: "approved" };
 
 type FormState = {
@@ -97,6 +98,12 @@ const urgencyTone: Record<string, string> = {
   standard: "bg-muted text-muted-foreground",
   urgent: "bg-primary/15 text-primary",
   critical: "bg-destructive/15 text-destructive",
+};
+
+const urgencyLabel: Record<string, string> = {
+  standard: "Standard",
+  urgent: "Erhöht",
+  critical: "Kritisch",
 };
 
 const statusLabel: Record<Ward["status"], string> = {
@@ -162,6 +169,7 @@ const Wards = () => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [wardsLoading, setWardsLoading] = useState(false);
   const [transports, setTransports] = useState<Record<string, TransportLog[]>>({});
 
   const PAGE_SIZE = 50;
@@ -188,6 +196,7 @@ const Wards = () => {
       setMyShelterId(null);
       return;
     }
+    let cancelled = false;
     supabase
       .from("shelters")
       .select("id")
@@ -195,13 +204,26 @@ const Wards = () => {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle()
-      .then(({ data }) => setMyShelterId((data as { id: string } | null)?.id ?? null));
+      .then(({ data }) => {
+        if (!cancelled) setMyShelterId((data as { id: string } | null)?.id ?? null);
+      });
+    return () => { cancelled = true; };
   }, [isEinrichtung, user, supabase]);
 
   useEffect(() => {
     if (authLoading) return;
-    if (!user) { setAccess({ kind: "anon" }); return; }
+    setAccess({ kind: "loading" });
+    if (!user) {
+      setWards([]);
+      setTransports({});
+      setSignedUrls({});
+      setPage(0);
+      setHasMore(false);
+      setAccess({ kind: "anon" });
+      return;
+    }
     if (isAdmin || isEinrichtung) { setAccess({ kind: "approved" }); return; }
+    let cancelled = false;
     supabase
       .from("sentinel_applications")
       .select("status")
@@ -209,12 +231,15 @@ const Wards = () => {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) return setAccess({ kind: "error" });
         if (!data) return setAccess({ kind: "no_application" });
         if (data.status === "approved") return setAccess({ kind: "approved" });
         if (data.status === "rejected") return setAccess({ kind: "rejected" });
         return setAccess({ kind: "pending" });
       });
+    return () => { cancelled = true; };
   }, [user, isAdmin, isEinrichtung, authLoading, supabase]);
 
   useEffect(() => {
@@ -244,36 +269,41 @@ const Wards = () => {
   }, [wards, signedUrls, storage]);
 
   const loadWards = async (reset = false) => {
-    const from = reset ? 0 : page * PAGE_SIZE;
-    const { data, error } = await supabase
-      .from("ward_listings")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .range(from, from + PAGE_SIZE - 1);
-    if (error) {
-      toast({ title: "Fehler beim Laden", description: error.message, variant: "destructive" });
-      return;
+    setWardsLoading(true);
+    try {
+      const from = reset ? 0 : page * PAGE_SIZE;
+      const { data, error } = await supabase
+        .from("ward_listings")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
+      if (error) {
+        toast({ title: "Fehler beim Laden", description: error.message, variant: "destructive" });
+        return;
+      }
+      const rows = (data ?? []) as Ward[];
+      setWards(reset ? rows : (prev) => [...prev, ...rows]);
+      if (reset) setPage(1);
+      else setPage((p) => p + 1);
+      setHasMore(rows.length === PAGE_SIZE);
+      const ids = rows.map((w) => w.id);
+      if (ids.length === 0) {
+        if (reset) setTransports({});
+        return;
+      }
+      const { data: tData } = await supabase
+        .from("transport_logs")
+        .select("*")
+        .in("ward_id", ids)
+        .order("created_at", { ascending: false });
+      const map: Record<string, TransportLog[]> = {};
+      (tData ?? []).forEach((t) => {
+        (map[t.ward_id] ??= []).push(t as unknown as TransportLog);
+      });
+      setTransports(reset ? map : (prev) => ({ ...prev, ...map }));
+    } finally {
+      setWardsLoading(false);
     }
-    const rows = (data ?? []) as Ward[];
-    setWards(reset ? rows : (prev) => [...prev, ...rows]);
-    if (reset) setPage(1);
-    else setPage((p) => p + 1);
-    setHasMore(rows.length === PAGE_SIZE);
-    const ids = rows.map((w) => w.id);
-    if (ids.length === 0) {
-      if (reset) setTransports({});
-      return;
-    }
-    const { data: tData } = await supabase
-      .from("transport_logs")
-      .select("*")
-      .in("ward_id", ids)
-      .order("created_at", { ascending: false });
-    const map: Record<string, TransportLog[]> = {};
-    (tData ?? []).forEach((t) => {
-      (map[t.ward_id] ??= []).push(t as unknown as TransportLog);
-    });
-    setTransports(reset ? map : (prev) => ({ ...prev, ...map }));
   };
 
   const loadMyInterests = async () => {
@@ -290,8 +320,7 @@ const Wards = () => {
   };
 
   // Shared create/edit save: uploads new images, then inserts or updates.
-  // The quarantine gate lives in RLS (status='placed' needs lab_report_path),
-  // so this stays thin. keepImages = existing gallery paths carried over.
+  // keepImages contains existing gallery paths carried over from an edit.
   const saveWard = async (
     values: FormState,
     keptImages: string[],
@@ -301,11 +330,19 @@ const Wards = () => {
     setSubmitting(true);
 
     const uploadedPaths: string[] = [];
+    const cleanupUploads = async () => {
+      if (uploadedPaths.length > 0) {
+        await supabase.storage.from("ward-images").remove(uploadedPaths).catch(() => {});
+      }
+    };
+    const removedImages = editTarget
+      ? (editTarget.images ?? []).filter((path) => !keptImages.includes(path))
+      : [];
     for (const file of newFiles) {
       const img = await sniffImage(file);
       if (!img) {
         setSubmitting(false);
-        if (uploadedPaths.length > 0) await supabase.storage.from("ward-images").remove(uploadedPaths).catch(() => {});
+        await cleanupUploads();
         toast({ title: "Ungültiges Bild", description: `${file.name}: nur JPG/PNG/WebP/GIF/AVIF bis 10 MB.`, variant: "destructive" });
         return;
       }
@@ -315,6 +352,7 @@ const Wards = () => {
         .upload(path, file, { contentType: img.mime, upsert: false });
       if (upErr) {
         setSubmitting(false);
+        await cleanupUploads();
         toast({ title: "Bild-Upload fehlgeschlagen", description: upErr.message, variant: "destructive" });
         return;
       }
@@ -351,13 +389,16 @@ const Wards = () => {
     setSubmitting(false);
     if (error) {
       // Remove orphaned uploads so a failed insert doesn't leak storage.
-      if (uploadedPaths.length > 0) await supabase.storage.from("ward-images").remove(uploadedPaths);
+      await cleanupUploads();
       toast({ title: "Konnte nicht speichern", description: error.message, variant: "destructive" });
       return;
     }
     toast({ title: editTarget ? "Ward aktualisiert" : "Ward eingestellt", description: "Sichtbar nur für vetted Stewards." });
     setShowForm(false);
     setEditTarget(null);
+    if (removedImages.length > 0) {
+      await storage.from("ward-images").remove(removedImages).catch(() => {});
+    }
     void loadWards(true);
   };
 
@@ -383,11 +424,6 @@ const Wards = () => {
   // Outcome recording: owner/admin sets the ward's status. The change_log
   // trigger on ward_listings writes the audit entry automatically.
   const setWardStatus = async (id: string, status: Ward["status"]) => {
-    const ward = wards.find((w) => w.id === id);
-    if (status === "placed" && ward && ward.quarantine_status !== "quarantine_safe") {
-      toast({ title: "Platzierung blockiert", description: "Nur Tiere mit Q-Safe-Status dürfen platziert werden. Labornachweis zuerst hochladen.", variant: "destructive" });
-      return;
-    }
     if (status === "withdrawn" && !window.confirm("Ward wirklich zurückziehen? Der Vorgang wird protokolliert.")) return;
     const { error } = await supabase.from("ward_listings").update({ status }).eq("id", id);
     if (error) {
@@ -395,7 +431,7 @@ const Wards = () => {
       return;
     }
     toast({ title: "Status aktualisiert", description: statusLabel[status] });
-    void loadWards();
+    setWards((prev) => prev.map((w) => (w.id === id ? { ...w, status } : w)));
   };
 
   // Quarantine editor: status + until + optional lab report (PDF/image).
@@ -403,8 +439,10 @@ const Wards = () => {
     const e = qEdit[wardId];
     if (!e || !user) return;
     setQBusy(wardId);
+    const previousLabReportPath = wards.find((w) => w.id === wardId)?.lab_report_path;
+    let labReportPath: string | null = null;
+    const quarantineUntil = e.until ? new Date(e.until).toISOString() : null;
     try {
-      let labReportPath: string | null = null;
       if (e.labFile) {
         const sniffed = await sniffDocument(e.labFile);
         if (!sniffed) throw new Error("Nur PDF/JPG/PNG/WebP/GIF/AVIF bis 10 MB.");
@@ -417,14 +455,27 @@ const Wards = () => {
       }
       const { error } = await supabase.from("ward_listings").update({
         quarantine_status: e.status,
-        quarantine_until: e.until ? new Date(e.until).toISOString() : null,
+        quarantine_until: quarantineUntil,
         ...(labReportPath ? { lab_report_path: labReportPath } : {}),
       }).eq("id", wardId);
       if (error) throw error;
       toast({ title: "Quarantäne-Status gespeichert" });
+      setWards((prev) => prev.map((w) => (w.id === wardId
+        ? {
+            ...w,
+            quarantine_status: e.status,
+            quarantine_until: quarantineUntil,
+            ...(labReportPath ? { lab_report_path: labReportPath } : {}),
+          }
+        : w)));
       setQEdit((p) => { const { [wardId]: _removed, ...rest } = p; return rest; });
-      void loadWards();
+      if (previousLabReportPath && labReportPath && previousLabReportPath !== labReportPath) {
+        await storage.from("lab-docs").remove([previousLabReportPath]).catch(() => {});
+      }
     } catch (err) {
+      if (labReportPath) {
+        await storage.from("lab-docs").remove([labReportPath]).catch(() => {});
+      }
       toast({ title: "Speichern fehlgeschlagen", description: (err as Error).message, variant: "destructive" });
     } finally {
       setQBusy(null);
@@ -435,7 +486,7 @@ const Wards = () => {
   const addTransport = async (wardId: string) => {
     if (!user || !tForm.from || !tForm.to) return;
     setTBusy(wardId);
-    const { error } = await supabase.from("transport_logs").insert({
+    const { data, error } = await supabase.from("transport_logs").insert({
       ward_id: wardId,
       handler_id: user.id,
       from_location: tForm.from.trim(),
@@ -444,7 +495,7 @@ const Wards = () => {
       carrier: tForm.carrier.trim(),
       checklist: tForm.checklist,
       notes: tForm.notes.trim(),
-    });
+    }).select("*").single();
     setTBusy(null);
     if (error) {
       toast({ title: "Transport konnte nicht dokumentiert werden", description: error.message, variant: "destructive" });
@@ -453,7 +504,12 @@ const Wards = () => {
     toast({ title: "Transport dokumentiert", description: "Eintrag ist Teil der Beweiskette." });
     setTOpen(null);
     setTForm({ from: "", to: "", mode: "", carrier: "", checklist: [], notes: "" });
-    void loadWards();
+    if (data) {
+      setTransports((prev) => ({
+        ...prev,
+        [wardId]: [data as unknown as TransportLog, ...(prev[wardId] ?? [])],
+      }));
+    }
   };
 
   return (
@@ -522,6 +578,14 @@ const Wards = () => {
             />
           )}
 
+          {access.kind === "error" && (
+            <Gate
+              icon={AlertTriangle}
+              title="Zugang konnte nicht geprüft werden"
+              body="Der Zugangsdienst ist momentan nicht erreichbar. Bitte lade die Seite später erneut."
+            />
+          )}
+
           {access.kind === "approved" && (
             <ApprovedView
               wards={wards}
@@ -553,6 +617,7 @@ const Wards = () => {
               setFilter={setFilter}
               search={search}
               setSearch={setSearch}
+              wardsLoading={wardsLoading}
               hasMore={hasMore}
               loadMore={() => void loadWards(false)}
               qEdit={qEdit}
@@ -632,6 +697,7 @@ type ApprovedViewProps = {
   setFilter: (f: "all" | "endstelle" | "pflegestelle" | "qsafe") => void;
   search: string;
   setSearch: (v: string) => void;
+  wardsLoading: boolean;
   hasMore: boolean;
   loadMore: () => void;
   qEdit: Record<string, { status: Ward["quarantine_status"]; until: string; labFile: File | null }>;
@@ -651,7 +717,7 @@ const ApprovedView = ({
   wards, myWards, currentUserId, isAdmin, canCreate, myInterests, interestStatus,
   showForm, editTarget, openCreate, openEdit, closeForm, submitting, saveWard, signedUrls,
   interestOpen, setInterestOpen, interestMessage, setInterestMessage, interestConsult, setInterestConsult, detailOpen, setDetailOpen, submitInterest, setWardStatus,
-  filter, setFilter, search, setSearch, hasMore, loadMore,
+  filter, setFilter, search, setSearch, wardsLoading, hasMore, loadMore,
   qEdit, setQEdit, qBusy, saveQuarantine,
   transports, tOpen, setTOpen, tForm, setTForm, tBusy, addTransport,
 }: ApprovedViewProps) => {
@@ -664,15 +730,29 @@ const ApprovedView = ({
       (w.scientific_name ?? "").toLowerCase().includes(q) || (w.region ?? "").toLowerCase().includes(q)),
   );
 
+  useEffect(() => {
+    if (!detailOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDetailOpen(null);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [detailOpen, setDetailOpen]);
+
   return (
     <>
-      <div className="flex items-end justify-between border-b border-border pb-4">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-4">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
             Steward-Zugang aktiv
           </p>
           <p className="mt-2 font-mono text-xs text-muted-foreground">
-            {wards.length} {wards.length === 1 ? "Ward" : "Wards"} · vertraulich
+            {visibleWards.length} von {wards.length} {wards.length === 1 ? "Ward" : "Wards"} · vertraulich
           </p>
         </div>
         {canCreate && (
@@ -696,16 +776,16 @@ const ApprovedView = ({
       )}
 
       <div className="mt-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-wrap gap-px bg-border">
+        <div className="flex flex-wrap gap-px bg-border" role="group" aria-label="Ward-Filter">
           {([
             ["all", "Alle"],
             ["endstelle", "Endstelle"],
             ["pflegestelle", "Pflegestelle"],
             ["qsafe", "Q-Safe"],
           ] as const).map(([k, lbl]) => (
-            <button key={k} onClick={() => setFilter(k)}
+            <button key={k} type="button" onClick={() => setFilter(k)}
               aria-pressed={filter === k}
-              className={`flex-1 px-4 py-2 text-center font-mono text-[10px] uppercase tracking-[0.22em] transition-colors md:flex-none md:text-left ${
+              className={`flex-1 px-4 py-2 text-center font-mono text-[10px] uppercase tracking-[0.22em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset md:flex-none md:text-left ${
                 filter === k ? "bg-surface-elevated text-primary" : "bg-surface text-muted-foreground hover:text-foreground"
               }`}
             >{lbl}</button>
@@ -724,13 +804,18 @@ const ApprovedView = ({
         </div>
       </div>
 
-      <div className="mt-10 grid gap-px bg-border md:grid-cols-2">
-        {wards.length === 0 && (
+      <div className="mt-10 grid gap-px bg-border md:grid-cols-2" aria-busy={wardsLoading}>
+        {wardsLoading && wards.length === 0 && (
+          <div className="flex justify-center bg-background p-10 md:col-span-2">
+            <LoadingSnake label="Lade Wards" compact />
+          </div>
+        )}
+        {!wardsLoading && wards.length === 0 && (
           <div className="bg-background p-10 text-sm text-muted-foreground md:col-span-2">
             Aktuell sind keine Wards offen.
           </div>
         )}
-        {visibleWards.length === 0 && wards.length > 0 && (
+        {!wardsLoading && visibleWards.length === 0 && wards.length > 0 && (
           <div className="bg-background p-10 text-sm text-muted-foreground md:col-span-2">
             Keine Wards in dieser Filterkategorie.
           </div>
@@ -740,14 +825,22 @@ const ApprovedView = ({
           const expressed = myInterests.has(w.id);
           const cover = (w.images ?? [])[0];
           return (
-            <article key={w.id} className="bg-background p-6">
+            <article key={w.id} className="bg-background p-6 transition-colors hover:bg-surface">
               <div
                 role="button"
                 tabIndex={0}
                 onClick={() => setDetailOpen(w.id)}
-                onKeyDown={(e) => { if (e.key === "Enter") setDetailOpen(w.id); }}
-                className="cursor-pointer select-none"
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setDetailOpen(w.id);
+                  }
+                }}
+                className="cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 aria-label={`${w.common_name} Details ansehen`}
+                aria-expanded={detailOpen === w.id}
+                aria-controls={`ward-detail-${w.id}`}
               >
                 <div className="flex items-start gap-4">
                   <div className="relative h-20 w-28 shrink-0 overflow-hidden border border-border bg-muted">
@@ -782,7 +875,7 @@ const ApprovedView = ({
                     </dl>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-2">
-                    <Badge className={urgencyTone[w.urgency] ?? urgencyTone.standard}>{w.urgency}</Badge>
+                    <Badge className={urgencyTone[w.urgency] ?? urgencyTone.standard}>{urgencyLabel[w.urgency] ?? w.urgency}</Badge>
                     {(owned || isAdmin) && (
                       <button
                         type="button"
@@ -825,6 +918,7 @@ const ApprovedView = ({
                   className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 md:p-8"
                   role="dialog"
                   aria-modal="true"
+                  aria-labelledby={`ward-detail-${w.id}`}
                   onClick={() => setDetailOpen(null)}
                 >
                   <div className="w-full max-w-3xl border border-border bg-background" onClick={(e) => e.stopPropagation()}>
@@ -833,7 +927,7 @@ const ApprovedView = ({
                         <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
                           {w.case_code} · {statusLabel[w.status]}
                         </p>
-                        <h3 className="font-display mt-1 text-2xl leading-tight">{w.common_name}</h3>
+                        <h3 id={`ward-detail-${w.id}`} className="font-display mt-1 text-2xl leading-tight">{w.common_name}</h3>
                         {w.scientific_name && (
                           <p className="mt-1 text-xs italic text-muted-foreground">
                             {w.scientific_name}
@@ -846,7 +940,7 @@ const ApprovedView = ({
                         )}
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-2">
-                        <Badge className={urgencyTone[w.urgency] ?? urgencyTone.standard}>{w.urgency}</Badge>
+                        <Badge className={urgencyTone[w.urgency] ?? urgencyTone.standard}>{urgencyLabel[w.urgency] ?? w.urgency}</Badge>
                         <button
                           type="button"
                           onClick={() => setDetailOpen(null)}
@@ -882,7 +976,7 @@ const ApprovedView = ({
                     Quarantäne &amp; Laborbefund
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Platzierung ist erst ab Q-Safe möglich — ohne Laborbefund keine Übergabe.
+                    Quarantäne und Laborbefund werden hier für die Übergabe dokumentiert.
                   </p>
                   <div className="mt-3 grid gap-3 md:grid-cols-3">
                     <select
@@ -1048,14 +1142,14 @@ const ApprovedView = ({
                         <span>Ich wünsche einen Termin für ein Beratungsgespräch.</span>
                       </label>
                       <div className="mt-3 flex gap-2">
-                        <Button size="sm" onClick={() => submitInterest(w.id)}>Bekundung senden</Button>
+                        <Button size="sm" disabled={!interestMessage.trim()} onClick={() => submitInterest(w.id)}>Bekundung senden</Button>
                         <Button size="sm" variant="ghost" onClick={() => { setInterestOpen(null); setInterestMessage(""); setInterestConsult(false); }}>
                           Abbrechen
                         </Button>
                       </div>
                     </div>
                   ) : (
-                    <Button size="sm" variant="outline" onClick={() => setInterestOpen(w.id)}>
+                    <Button size="sm" variant="outline" onClick={() => { setInterestOpen(w.id); setInterestMessage(""); setInterestConsult(false); }}>
                       {w.placement_type === "pflegestelle"
                         ? "Als amtlicher Verwahrer bewerben"
                         : "Interesse als Steward bekunden"}
@@ -1075,8 +1169,8 @@ const ApprovedView = ({
 
       {hasMore && (
         <div className="mt-8 flex justify-center">
-          <Button variant="outline" onClick={loadMore}>
-            Weitere Wards laden
+          <Button variant="outline" disabled={wardsLoading} onClick={loadMore}>
+            {wardsLoading ? "Lade Wards …" : "Weitere Wards laden"}
           </Button>
         </div>
       )}
@@ -1116,7 +1210,7 @@ const WardForm = ({
       placement_type: ward.placement_type,
       legal_custody: ward.legal_custody,
       quarantine_status: ward.quarantine_status,
-      quarantine_until: ward.quarantine_until ?? "",
+      quarantine_until: ward.quarantine_until?.slice(0, 10) ?? "",
     } : emptyForm,
   );
   const [pendingImages, setPendingImages] = useState<File[]>([]);
@@ -1155,7 +1249,7 @@ const WardForm = ({
       placement_type: w.placement_type,
       legal_custody: w.legal_custody,
       quarantine_status: w.quarantine_status,
-      quarantine_until: w.quarantine_until ?? "",
+      quarantine_until: w.quarantine_until?.slice(0, 10) ?? "",
     });
     setCarriedImages(w.images ?? []);
     setPendingImages([]);

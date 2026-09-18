@@ -27,6 +27,10 @@ const REQUIRED_SLOTS = ["id_front", "id_back", "selfie"] as const;
 const ALL_SLOTS = ["id_front", "id_back", "selfie", "facility"] as const;
 type Slot = (typeof ALL_SLOTS)[number];
 
+const ENCLOSURE_TYPES = ["Quarantäne", "Terrarium-Trocken", "Terrarium-Feucht", "Aquaterrarium", "Gifttier-Sicher"];
+const ENCLOSURE_STATUSES = ["frei", "belegt", "reinigung", "wartung"];
+const MAX_ENCLOSURES = 50;
+
 const fromMatch = EMAIL_FROM.match(/^(.*?)\s*<([^>]+)>$/);
 const SENDER = fromMatch
   ? { name: fromMatch[1].trim(), email: fromMatch[2].trim() }
@@ -62,6 +66,8 @@ type Questionnaire = {
   phone: string;
   birth_date: string;
   enclosure: { size: string; lighting: string; climate: string; setup: string };
+  /** Enclosure slots from step 3 — seeded into the live capacity grid. */
+  enclosures: { id: string; type: string; sizeCm: string; status: string }[];
   current_stock: string;
   feeding: string;
   overwintering: string;
@@ -217,6 +223,20 @@ function validatePayload(input: unknown): Payload {
   const sachkunde = (q!.sachkunde ?? "none") as Questionnaire["sachkunde"];
   if (!["none", "bna", "dght", "other"].includes(sachkunde)) throw new Error("invalid questionnaire.sachkunde");
   if (sachkunde === "other" && !(q!.sachkunde_detail ?? "").trim()) throw new Error("missing questionnaire.sachkunde_detail");
+  const enclosures = Array.isArray(q!.enclosures)
+    ? (q!.enclosures as unknown[]).slice(0, MAX_ENCLOSURES).flatMap((raw) => {
+        if (!raw || typeof raw !== "object") return [];
+        const e = raw as Record<string, unknown>;
+        const id = typeof e.id === "string" ? e.id.trim().slice(0, 12) : "";
+        if (!id) return [];
+        return [{
+          id,
+          type: ENCLOSURE_TYPES.includes(String(e.type)) ? String(e.type) : ENCLOSURE_TYPES[1],
+          sizeCm: typeof e.sizeCm === "string" ? e.sizeCm.trim().slice(0, 40) : "",
+          status: ENCLOSURE_STATUSES.includes(String(e.status)) ? String(e.status) : "frei",
+        }];
+      })
+    : [];
   const questionnaire: Questionnaire = {
     street: q!.street.trim(),
     house_number: q!.house_number.trim(),
@@ -225,6 +245,7 @@ function validatePayload(input: unknown): Payload {
     phone: (q!.phone ?? "").trim(),
     birth_date: q!.birth_date,
     enclosure: enc,
+    enclosures,
     current_stock: text(q!.current_stock ?? "", "questionnaire.current_stock", 3000),
     feeding: text(q!.feeding, "questionnaire.feeding", 3000),
     overwintering: text(q!.overwintering ?? "", "questionnaire.overwintering", 2000),
@@ -272,8 +293,12 @@ async function clerkEmail(userId: string): Promise<string> {
     headers: { authorization: `Bearer ${CLERK_SECRET_KEY}` },
   });
   if (!res.ok) throw new Error(`clerk user lookup failed: ${res.status}`);
-  const user = await res.json();
-  const email: string | undefined = user?.primary_email_address;
+  const user = (await res.json()) as {
+    primary_email_address_id?: string | null;
+    email_addresses?: { id: string; email_address: string }[];
+  };
+  const email = user.email_addresses?.find((entry) => entry.id === user.primary_email_address_id)?.email_address
+    ?? user.email_addresses?.[0]?.email_address;
   if (!email) throw new Error("no verified email address on account");
   return email;
 }

@@ -2,11 +2,11 @@
 // Authenticated user deletes their own data. Full inventory:
 //  - Storage: kyc-documents, ward-images, id-photos, lab-docs (own folder)
 //  - DB: application_documents, sentinel_applications, pending_shelter_requests,
-//        sentinel_shelter_requests, ward_interest, ward_listings (owned),
-//        shelters (owned), identification_requests (created, cascades votes),
+//        sentinel_shelter_requests, ward_interest, shelters (owned),
+//        identification_requests (created, cascades votes),
 //        sentinel_change_requests, user_roles, profiles
 //  - Anonymized (evidence must survive, identity must not): care_logs,
-//        change_log, role_change_log
+//        transport_logs, change_log, role_change_log, and owned ward records
 // The Clerk user itself is deleted last via the Admin API.
 //
 // Server guarantees:
@@ -180,13 +180,20 @@ Deno.serve(async (req) => {
 
     // 2) DB rows — FK-cascade order. Every failure aborts; each delete is
     //    idempotent so a retry after a mid-sequence failure resumes safely.
+    // Keep Ward rows as anonymized custody records; deleting them would also
+    // cascade away the care and transport evidence attached to each Ward.
+    await anonymize("ward_listings", `owner_id=eq.${userId}`, {
+      owner_id: "deleted",
+      status: "withdrawn",
+      images: [],
+      lab_report_path: null,
+    });
     const rowDeletes: [string, string][] = [
       ["application_documents", `user_id=eq.${userId}`],
       ["sentinel_applications", `user_id=eq.${userId}`],
       ["pending_shelter_requests", `user_id=eq.${userId}`],
       ["sentinel_shelter_requests", `sentinel_id=eq.${userId}`],
       ["ward_interest", `applicant_id=eq.${userId}`],
-      ["ward_listings", `owner_id=eq.${userId}`],
       ["shelters", `owner_id=eq.${userId}`],
       ["identification_requests", `created_by=eq.${userId}`],
       ["sentinel_change_requests", `user_id=eq.${userId}`],
@@ -201,6 +208,7 @@ Deno.serve(async (req) => {
     // 3) Anonymize rows that must survive as evidence (author/actor ids stay
     //    — no longer linkable once the Clerk user is gone).
     await anonymize("care_logs", `author_id=eq.${encodeURIComponent(userId)}`, { author_name: "Gelöschtes Konto" });
+    await anonymize("transport_logs", `handler_id=eq.${encodeURIComponent(userId)}`, { handler_id: "deleted" });
     await anonymize("change_log", `actor_id=eq.${encodeURIComponent(userId)}`, { actor_id: "deleted" });
     await anonymize("role_change_log", `actor_id=eq.${encodeURIComponent(userId)}`, { actor_id: "deleted" });
     await anonymize("role_change_log", `target_user_id=eq.${encodeURIComponent(userId)}`, { target_user_id: "deleted" });
@@ -209,7 +217,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: `cleanup failed: ${(e as Error).message}` }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  // 3) Delete Clerk user (cascade revokes sessions).
+  // 4) Delete Clerk user (cascade revokes sessions).
   const res = await fetch(`https://api.clerk.com/v1/users/${userId}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${CLERK_SECRET}`, "Content-Type": "application/json" },
