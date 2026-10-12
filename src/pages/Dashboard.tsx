@@ -38,7 +38,7 @@ const Dashboard = () => {
             <span className="font-mono text-xs text-muted-foreground">{current.sub}</span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex gap-px bg-border">
+            <div className="flex flex-wrap gap-px bg-border">
               {roles.map((r) => (
                 <button
                   key={r.id}

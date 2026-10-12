@@ -215,7 +215,7 @@ export const LandingV2 = () => {
   }, []);
 
   return (
-    <div className="v2scope min-h-screen antialiased" data-acc={acc}>
+    <div className="v2scope min-h-screen overflow-x-clip antialiased" data-acc={acc}>
       <style>{V2_CSS}</style>
       <SiteHeader />
 
@@ -226,8 +226,8 @@ export const LandingV2 = () => {
             <span className="mx-2 hidden sm:inline">·</span>
             <span className="hidden sm:inline">bklit-edition · light + dark</span>
           </p>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1   border border-border p-0.5 font-mono text-[10px] uppercase tracking-[0.15em]" role="group" aria-label="Akzentfarbe wählen">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="flex flex-wrap items-center gap-1   border border-border p-0.5 font-mono text-[10px] uppercase tracking-[0.15em]" role="group" aria-label="Akzentfarbe wählen">
               {(["orange", "lila", "mono", "forest", "lagoon"] as const).map((v) => (
                 <button
                   key={v}
@@ -442,7 +442,7 @@ export const LandingV2 = () => {
                       </span>
                     </li>
                   )}
-                  <li className="grid grid-cols-[9rem_minmax(0,22rem)] justify-center gap-x-4 px-3 sm:grid-cols-[1fr_9rem_minmax(0,1fr)] sm:px-0 lg:flex lg:w-48 lg:shrink-0 lg:flex-col">
+                  <li className="grid grid-cols-[clamp(9rem,26vw,11rem)_minmax(0,clamp(12rem,48vw,22rem))] justify-center gap-x-4 px-3 sm:grid-cols-[1fr_clamp(11rem,18vw,12rem)_minmax(0,1fr)] sm:px-0 lg:flex lg:w-48 lg:shrink-0 lg:flex-col">
                     {/* mobil: Node-Kette horizontal mittig, Text rechts davon */}
                     <div className="flex flex-col sm:col-start-2">
                       {i > 0 && (
@@ -522,7 +522,8 @@ export const LandingV2 = () => {
         <section className="container py-20 lg:py-28">
           <p className="font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground">Rechtsrahmen_</p>
           <h2 className="mt-4 max-w-3xl text-4xl font-bold tracking-tight md:text-5xl">Für deutsches Recht gebaut — ab Tag eins.</h2>
-          <Wire className="mt-10">
+          {/* Handy: 12px einrücken — die 32px-Eckdeko des Wire-Rahmens passt dann in den Viewport */}
+          <Wire className="mx-3 mt-10 sm:mx-0">
           <div className="relative">
             {/* Dots je Breakpoint-Layout: 1×6 → 2×3 → 3×2 (Quadrat-Marker) */}
             <GridDots cols={1} rows={6} square className="sm:hidden" />

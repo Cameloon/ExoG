@@ -296,7 +296,7 @@ const SentinelNetwork = () => {
                   {shelters.map((s) => {
                     const existing = requests.find((r) => r.shelter_id === s.id && r.status !== "declined");
                     return (
-                      <li key={s.id} className="flex items-center justify-between gap-4 px-5 py-4">
+                      <li key={s.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <div className="min-w-0">
                           <Link to={`/shelters/${s.id}`} className="font-medium hover:text-primary transition-colors">{s.name}</Link>
                           <p className="mt-1 flex items-center gap-1 truncate text-xs text-muted-foreground">
@@ -306,7 +306,7 @@ const SentinelNetwork = () => {
                             <MapPin className="h-3 w-3" /> {s.region}
                           </p>
                         </div>
-                        <div className="flex shrink-0 items-center gap-3">
+                        <div className="flex shrink-0 items-center justify-end gap-3">
                           {existing ? (
                             <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                               {statusIcon(existing.status)} {existing.status}
@@ -347,7 +347,7 @@ const SentinelNetwork = () => {
                       {visibleRequests.map((r) => {
                         const s = shelters.find((x) => x.id === r.shelter_id);
                         return (
-                          <li key={r.id} className="flex items-center justify-between gap-4 px-5 py-4">
+                          <li key={r.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <div>
                               <p className="text-sm">{s?.name ?? "Einrichtung"}</p>
                               <span className="mt-1 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -355,7 +355,7 @@ const SentinelNetwork = () => {
                                 {r.sentinel_hidden && <span className="text-muted-foreground/70">· ausgeblendet</span>}
                               </span>
                             </div>
-                            <div className="flex shrink-0 items-center gap-2">
+                            <div className="flex shrink-0 items-center justify-end gap-2">
                               {s && <Link to={`/shelters/${s.id}`} className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary hover:underline">Profil</Link>}
                               {r.sentinel_hidden ? (
                                 <Button size="sm" variant="outline" onClick={() => setHiddenFlag(r.id, false)}>

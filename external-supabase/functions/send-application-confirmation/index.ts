@@ -55,10 +55,10 @@ function rateLimited(userId: string): boolean {
   return hits.length > RATE_MAX;
 }
 
-// Recipient is the caller's verified Clerk email, not the client-supplied
+// Recipient is the caller's verified Clerk email, never the client-supplied
 // address stored on the application (which a caller could set to a third
-// party's address to spam them). Falls back to the stored email only when no
-// CLERK_SECRET_KEY is configured.
+// party's address to spam them). CLERK_SECRET_KEY is required for that reason
+// — Deno.serve refuses to run without it.
 async function clerkPrimaryEmail(userId: string): Promise<string | null> {
   if (!CLERK_SECRET) return null;
   const res = await fetch(`https://api.clerk.com/v1/users/${userId}`, {
@@ -95,7 +95,7 @@ async function loadOwnApplication(userId: string, body: Payload): Promise<{ emai
   return rows[0] ?? null;
 }
 
-const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "ideal-tetra-26.clerk.accounts.dev";
+const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "";
 const CLERK_JWKS_URL = `https://${CLERK_DOMAIN}/.well-known/jwks.json`;
 
 // ponytail: module-scope JWKS cache — the isolate is reused across warm
@@ -166,6 +166,13 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  if (!CLERK_DOMAIN || !CLERK_SECRET) {
+    return new Response(JSON.stringify({ error: "function not configured" }), {
+      status: 503,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const auth = req.headers.get("authorization") ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   // The client sends the Clerk JWT; the anon apikey alone is not enough.
@@ -197,7 +204,13 @@ Deno.serve(async (req) => {
     // German-only app — no language branch.
     const subject = `Bewerbung eingegangen · ${app.case_id}`;
     const text = `Hallo ${app.full_name},\n\nDeine Sentinel-Bewerbung (${app.case_id}) ist eingegangen. Wir melden uns innerhalb von 5 Werktagen.\n\n— BioSteward Custody Network`;
-    const recipient = (await clerkPrimaryEmail(userId)) ?? app.email;
+    const recipient = await clerkPrimaryEmail(userId);
+    if (!recipient) {
+      return new Response(JSON.stringify({ error: "no verified email on account" }), {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     if (BREVO_API_KEY) {
       const res = await fetch("https://api.brevo.com/v3/smtp/email", {

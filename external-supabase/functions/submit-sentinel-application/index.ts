@@ -14,7 +14,7 @@
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "ideal-tetra-26.clerk.accounts.dev";
+const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "";
 const CLERK_SECRET_KEY = Deno.env.get("CLERK_SECRET_KEY") ?? "";
 const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "http://localhost:8080";
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY") ?? "";
@@ -440,9 +440,16 @@ Deno.serve(async (req) => {
     });
   }
 
+  if (!CLERK_DOMAIN || !SUPABASE_URL || !SERVICE_ROLE || !CLERK_SECRET_KEY) {
+    return new Response(JSON.stringify({ error: "function not configured" }), {
+      status: 503,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const token = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "");
   const userId = token ? await verifyClerkToken(token) : null;
-  if (!userId || !SUPABASE_URL || !SERVICE_ROLE) {
+  if (!userId) {
     return new Response(JSON.stringify({ error: "unauthorized" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

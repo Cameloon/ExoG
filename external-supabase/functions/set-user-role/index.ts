@@ -12,7 +12,7 @@
 
 const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "http://localhost:8080";
 const CLERK_SECRET_KEY = Deno.env.get("CLERK_SECRET_KEY") ?? "";
-const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "ideal-tetra-26.clerk.accounts.dev";
+const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "";
 const CLERK_JWKS_URL = `https://${CLERK_DOMAIN}/.well-known/jwks.json`;
 
 // ponytail: module-scope JWKS cache — the isolate is reused across warm
@@ -122,10 +122,17 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  if (!CLERK_DOMAIN || !CLERK_SECRET_KEY) {
+    return new Response(JSON.stringify({ error: "function not configured" }), {
+      status: 503,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const auth = req.headers.get("authorization") ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   const callerId = token ? await verifyClerkToken(token) : null;
-  if (!callerId || !CLERK_SECRET_KEY) {
+  if (!callerId) {
     return new Response(JSON.stringify({ error: "unauthorized" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

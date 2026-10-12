@@ -38,15 +38,19 @@ where n.nspname = 'public'
 -- (expect 0 rows)
 
 -- 3) Helper functions are authenticated-only (no PUBLIC execute)
+--    aclexplode on pg_proc.proacl works on every Postgres version (pg_proc_acl
+--    is PG16+ only). grantee 0 = PUBLIC; NULL proacl = default ACL = PUBLIC execute.
 select 'ok' as result
 from pg_proc p
 join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
   and p.proname in ('has_role','is_approved_sentinel','is_expert','is_gov','is_gov_for_region',
-                    'current_region','current_clerk_user_id','append_care_log')
+                    'current_region','current_clerk_user_id','append_care_log',
+                    'log_change','rls_auto_enable')
   and exists (
-    select 1 from pg_proc_acl a
-    where a.oid = p.oid and a.grantee = (select oid from pg_roles where rolname = 'public')
+    select 1
+    from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+    where a.grantee = 0
   );
 
 -- (expect 0 rows)
@@ -67,3 +71,27 @@ where not exists (
 );
 
 -- (expect 0 rows)
+
+-- 6) shelter_directory must run as SECURITY INVOKER (Supabase advisor 0010).
+--    A definer view evaluates RLS as its owner, so it silently bypasses the
+--    caller's policies. Fixed by 00036.
+select 'ok' as result
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname = 'shelter_directory'
+  and coalesce(array_to_string(c.reloptions, ','), '') ilike '%security_invoker=true%';
+
+-- (0 rows = the view is still SECURITY DEFINER → apply 00036)
+
+-- 7) Private shelter columns must live in shelter_contacts, not on the
+--    directory-readable shelters table (00036 moves them).
+select 'ok' as result
+where not exists (
+  select 1 from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'shelters'
+    and column_name in ('address', 'contact_email', 'contact_phone')
+);
+
+-- (0 rows = a private column is still exposed through shelters)

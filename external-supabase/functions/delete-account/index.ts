@@ -18,7 +18,7 @@
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const CLERK_SECRET = Deno.env.get("CLERK_SECRET_KEY") ?? "";
-const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "ideal-tetra-26.clerk.accounts.dev";
+const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": Deno.env.get("APP_ORIGIN") ?? "http://localhost:8080",
@@ -155,15 +155,15 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return new Response(JSON.stringify({ error: "method not allowed" }), { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
+  // Fail closed before deleting anything. Without these secrets the function
+  // cannot complete the cleanup contract and must not create a partial delete.
+  if (!SUPABASE_URL || !SERVICE_ROLE || !CLERK_SECRET || !CLERK_DOMAIN) {
+    return new Response(JSON.stringify({ error: "account deletion unavailable" }), { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
   const token = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "");
   const userId = token ? await verifyClerkToken(token) : null;
   if (!userId) return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-
-  // Fail closed before deleting anything. Without these secrets the function
-  // cannot complete the cleanup contract and must not create a partial delete.
-  if (!SUPABASE_URL || !SERVICE_ROLE || !CLERK_SECRET) {
-    return new Response(JSON.stringify({ error: "account deletion unavailable" }), { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
 
   if (rateLimited(userId)) {
     return new Response(JSON.stringify({ error: "rate limited" }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });

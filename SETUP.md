@@ -29,8 +29,15 @@ every step. Allow ~30 minutes the first time.
 
 1. In Supabase, open **SQL Editor → New query**.
 2. Paste and run each file from `external-supabase/migrations/` **in filename
-   order** (`00001_init.sql` … up to the highest number present). Each file is
-   idempotent, so re-running one is safe.
+   order** (`00001_init.sql` … up to the highest number present).
+
+   > ⚠️ **Only on an empty project.** `00001_init.sql` starts with
+   > `drop table … cascade` on `profiles`, `user_roles`,
+   > `sentinel_applications`, `application_documents` and
+   > `application_audit_log` — re-running it on a project that has data
+   > deletes every application, KYC row and audit entry. The later files are
+   > re-runnable; `00001` is not. On a project with data, apply only the
+   > migrations that are actually missing.
 3. You should see `Success` for every file.
 4. This creates: `profiles`, `user_roles`, `sentinel_applications`,
    `application_documents`, `application_audit_log`, `ward_listings`,
@@ -116,6 +123,11 @@ informational), but if you want them auto-created:
    `user.created` event and inserts into `profiles`. Use the Supabase
    service role key (set as a function secret via
    `supabase secrets set SUPABASE_SERVICE_ROLE_KEY=...`).
+3. **Verify the signature before writing anything.** Validate the `svix-*`
+   headers against `CLERK_WEBHOOK_SIGNING_SECRET` (Clerk's docs ship a
+   10-line `verifyWebhook` snippet for Deno). This function runs with the
+   service role and its URL is public — without the signature check it is an
+   open write endpoint into `profiles`.
 3. The skeleton lives in
    `external-supabase/functions/send-application-confirmation/index.ts`
    — copy and adapt.

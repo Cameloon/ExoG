@@ -776,7 +776,7 @@ const ApprovedView = ({
       )}
 
       <div className="mt-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-wrap gap-px bg-border" role="group" aria-label="Ward-Filter">
+        <div className="grid grid-cols-2 gap-px bg-border sm:flex sm:flex-wrap" role="group" aria-label="Ward-Filter">
           {([
             ["all", "Alle"],
             ["endstelle", "Endstelle"],
@@ -785,7 +785,7 @@ const ApprovedView = ({
           ] as const).map(([k, lbl]) => (
             <button key={k} type="button" onClick={() => setFilter(k)}
               aria-pressed={filter === k}
-              className={`flex-1 px-4 py-2 text-center font-mono text-[10px] uppercase tracking-[0.22em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset md:flex-none md:text-left ${
+              className={`px-4 py-2 text-center font-mono text-[10px] uppercase tracking-[0.22em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset md:text-left ${
                 filter === k ? "bg-surface-elevated text-primary" : "bg-surface text-muted-foreground hover:text-foreground"
               }`}
             >{lbl}</button>
@@ -842,7 +842,7 @@ const ApprovedView = ({
                 aria-expanded={detailOpen === w.id}
                 aria-controls={`ward-detail-${w.id}`}
               >
-                <div className="flex items-start gap-4">
+                <div className="flex flex-wrap items-start gap-4">
                   <div className="relative h-20 w-28 shrink-0 overflow-hidden border border-border bg-muted">
                     {cover ? (signedUrls[cover]
                       ? <img src={signedUrls[cover]} alt={w.common_name} loading="lazy" className="h-full w-full object-cover" />
@@ -874,7 +874,7 @@ const ApprovedView = ({
                       {w.region && <Meta label="Region" value={w.region} />}
                     </dl>
                   </div>
-                  <div className="flex shrink-0 flex-col items-end gap-2">
+                  <div className="flex w-full shrink-0 flex-row items-center justify-between gap-2 sm:w-auto sm:flex-col sm:items-end">
                     <Badge className={urgencyTone[w.urgency] ?? urgencyTone.standard}>{urgencyLabel[w.urgency] ?? w.urgency}</Badge>
                     {(owned || isAdmin) && (
                       <button

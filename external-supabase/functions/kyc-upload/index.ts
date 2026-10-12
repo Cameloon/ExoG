@@ -19,7 +19,7 @@
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "ideal-tetra-26.clerk.accounts.dev";
+const CLERK_DOMAIN = Deno.env.get("CLERK_DOMAIN") ?? "";
 const BUCKET = "kyc-documents";
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -124,6 +124,10 @@ async function applicationWritable(applicationId: string, userId: string): Promi
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return new Response(JSON.stringify({ error: "method not allowed" }), { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+  if (!CLERK_DOMAIN || !SUPABASE_URL || !SERVICE_ROLE) {
+    return new Response(JSON.stringify({ error: "function not configured" }), { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
 
   const auth = req.headers.get("authorization") ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
