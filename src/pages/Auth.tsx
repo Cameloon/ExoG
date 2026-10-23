@@ -44,8 +44,6 @@ const Auth = () => {
   const signUpFlow = useSignUp();
 
   const params = new URLSearchParams(location.search);
-  // /app-v2-Skin: Navigation bleibt im v2-Layout (Prefix für Redirects).
-  const base = location.pathname.startsWith("/app-v2") ? "/app-v2" : "";
   const [mode, setMode] = useState<AuthMode>(params.get("mode") === "signup" ? "signup" : "signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -85,9 +83,9 @@ const Auth = () => {
 
   useEffect(() => {
     if (!loading && user) {
-      navigate(base + sentinelWizardTarget, { replace: true });
+      navigate(sentinelWizardTarget, { replace: true });
     }
-  }, [loading, user, navigate, sentinelWizardTarget, base]);
+  }, [loading, user, navigate, sentinelWizardTarget]);
 
   const finishAuth = async (
     createdSessionId: string | null | undefined,
@@ -110,7 +108,7 @@ const Auth = () => {
         // non-blocking: admin queue can still be seeded manually
       }
     }
-    navigate(base + sentinelWizardTarget, { replace: true });
+    navigate(sentinelWizardTarget, { replace: true });
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -416,19 +414,19 @@ const Auth = () => {
             <button
               type="button"
               onClick={() => {
-                const oauthDone = base + sentinelWizardTarget;
+                const oauthDone = sentinelWizardTarget;
                 if (mode === "signup") {
                   if (!signUpFlow.isLoaded) return;
                   signUpFlow.signUp.authenticateWithRedirect({
                     strategy: "oauth_google",
-                    redirectUrl: `${base}/auth`,
+                    redirectUrl: "/auth",
                     redirectUrlComplete: oauthDone,
                   });
                 } else {
                   if (!signInFlow.isLoaded) return;
                   signInFlow.signIn.authenticateWithRedirect({
                     strategy: "oauth_google",
-                    redirectUrl: `${base}/auth`,
+                    redirectUrl: "/auth",
                     redirectUrlComplete: oauthDone,
                   });
                 }
@@ -452,7 +450,7 @@ const Auth = () => {
         ) : null}
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          <Link to={base || "/start"} className="hover:text-foreground">← Startseite</Link>
+          <Link to="/start" className="hover:text-foreground">← Startseite</Link>
         </p>
       </main>
     </div>

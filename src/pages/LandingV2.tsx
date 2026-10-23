@@ -220,12 +220,7 @@ export const LandingV2 = () => {
       <SiteHeader />
 
       <div className="border-b border-border">
-        <div className="container flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2">
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-            <span className="v2a">● Design-Labor v2</span>
-            <span className="mx-2 hidden sm:inline">·</span>
-            <span className="hidden sm:inline">bklit-edition · light + dark</span>
-          </p>
+        <div className="container flex flex-wrap items-center justify-end gap-x-4 gap-y-2 py-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <div className="flex flex-wrap items-center gap-1   border border-border p-0.5 font-mono text-[10px] uppercase tracking-[0.15em]" role="group" aria-label="Akzentfarbe wählen">
               {(["orange", "lila", "mono", "forest", "lagoon"] as const).map((v) => (
@@ -242,12 +237,6 @@ export const LandingV2 = () => {
                 </button>
               ))}
             </div>
-            <Link to="/app-v2" className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-              → App v2
-            </Link>
-            <Link to="/" className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-              ← Original
-            </Link>
           </div>
         </div>
       </div>

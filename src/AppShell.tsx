@@ -26,7 +26,6 @@ const ShelterProfile = lazy(() => import("./pages/ShelterProfile.tsx"));
 const SentinelNetwork = lazy(() => import("./pages/SentinelNetwork.tsx"));
 const Account = lazy(() => import("./pages/Account.tsx"));
 const Care = lazy(() => import("./pages/Care.tsx"));
-const AppV2Layout = lazy(() => import("./pages/appv2/AppV2Layout.tsx"));
 
 const RouteFallback = () => <PageLoader label="Lade Seite" />;
 
@@ -75,7 +74,6 @@ const AppShellRoot = () => {
           <div id="main" tabIndex={-1}>
             <Suspense fallback={<RouteFallback />}>
               <Routes>
-                <Route path="/app-v2/*" element={<AppV2Layout />} />
                 <Route path="/dashboard" element={<DashboardHome />} />
                 <Route path="/demo" element={<Dashboard />} />
                 <Route path="/care" element={<RequireAuth><Care /></RequireAuth>} />

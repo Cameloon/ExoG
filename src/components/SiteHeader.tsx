@@ -14,11 +14,6 @@ export const SiteHeader = () => {
   const { user, isAdmin, isBehoerde, isEinrichtung, role, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Im /app-v2-Skin bleiben alle internen Links innerhalb von /app-v2 —
-  // sonst springt die Navigation aus dem v2-Design in die Original-Ansicht.
-  const base = location.pathname.startsWith("/app-v2") ? "/app-v2" : "";
-  const route = (href: string) => `${base}${href}`;
-
   // Logged-out: public landing/marketing nav. Logged-in: role-based app nav
   // (replaces the landing links, like a normal web-app). Logo still → home.
   const publicNav = [
@@ -60,13 +55,13 @@ export const SiteHeader = () => {
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
       <div className="container flex h-16 items-center justify-between">
-        <Logo to={base || "/start"} />
+        <Logo to="/start" />
         <nav className="hidden items-center gap-7 md:flex">
           {nav.map((n) =>
             n.type === "route" ? (
-              <Link key={n.href} to={route(n.href)}
+              <Link key={n.href} to={n.href}
                 className={`font-mono text-xs uppercase tracking-[0.18em] transition-colors hover:text-foreground ${
-                  location.pathname === route(n.href) ? "text-primary" : "text-muted-foreground"
+                  location.pathname === n.href ? "text-primary" : "text-muted-foreground"
                 }`}>
                 {n.label}
               </Link>
@@ -84,12 +79,12 @@ export const SiteHeader = () => {
             <Button variant="ghost" size="sm" onClick={() => signOut()}>{t("nav.signOut")}</Button>
           ) : (
             <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex">
-              <Link to={route("/auth")}>{t("nav.signIn")}</Link>
+              <Link to="/auth">{t("nav.signIn")}</Link>
             </Button>
           )}
           {!user && (
             <Button asChild variant="default" size="sm" className="hidden sm:inline-flex">
-                <Link to={route("/demo")}>{t("nav.viewPlatform")}</Link>
+                <Link to="/demo">{t("nav.viewPlatform")}</Link>
             </Button>
           )}
           {/* Mobile menu trigger */}
@@ -110,7 +105,7 @@ export const SiteHeader = () => {
         <SheetContent side="right" className="flex w-[88vw] max-w-xs flex-col gap-0 p-0">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
           <div className="flex h-16 items-center border-b border-border px-6">
-            <Logo to={base || "/start"} />
+            <Logo to="/start" />
           </div>
 
           {/* Primary CTA — full-width on mobile */}
@@ -128,7 +123,7 @@ export const SiteHeader = () => {
               </Button>
             ) : (
               <Button asChild variant="default" className="w-full" onClick={closeMobile}>
-              <Link to={route("/demo")}>{t("nav.viewPlatform")}</Link>
+              <Link to="/demo">{t("nav.viewPlatform")}</Link>
               </Button>
             )}
           </div>
@@ -139,10 +134,10 @@ export const SiteHeader = () => {
               n.type === "route" ? (
                 <Link
                   key={n.href}
-                  to={route(n.href)}
+                  to={n.href}
                   onClick={closeMobile}
                   className={`border-b border-border/60 px-6 py-4 font-mono text-xs uppercase tracking-[0.18em] transition-colors hover:bg-surface-elevated hover:text-foreground ${
-                    location.pathname === route(n.href) ? "text-primary" : "text-muted-foreground"
+                    location.pathname === n.href ? "text-primary" : "text-muted-foreground"
                   }`}
                 >
                   {n.label}
@@ -164,7 +159,7 @@ export const SiteHeader = () => {
           <div className="mt-auto border-t border-border p-4">
             {!user && (
               <Button asChild variant="outline" className="w-full">
-                <Link to={route("/auth")} onClick={closeMobile}>{t("nav.signIn")}</Link>
+                <Link to="/auth" onClick={closeMobile}>{t("nav.signIn")}</Link>
               </Button>
             )}
           </div>

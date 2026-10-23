@@ -1,5 +1,5 @@
 // Shared /v2 theme: tokens (light+dark), switchable accent, wireframe
-// frame, fonts — consumed by /v2 (LandingV2) and /app-v2 (AppV2Layout).
+// frame, fonts — consumed by /v2 (LandingV2) and the app shell.
 
 export const V2_CSS = `@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap');
 
