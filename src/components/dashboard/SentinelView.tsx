@@ -16,6 +16,8 @@ import {
   Fingerprint,
   AlertCircle,
   Download,
+  ImagePlus,
+  X,
 } from "lucide-react";
 import { CASES, CARE_LOGS, ME_SENTINEL, DUTIES, ACTIVITY_7D, type CareLog, type Duty, type DutyPriority, type EnclosureSlot, type SentinelProfile } from "@/lib/dashboard-data";
 import { RATIONALE_RULES, validateRationale, sign } from "@/lib/care-log-validation";
@@ -31,6 +33,7 @@ import {
   type WardRow,
 } from "@/lib/care-logs";
 import { capacityFromEnclosures, saveEnclosures } from "@/lib/enclosures";
+import { sniffImage, uploadId } from "@/lib/uploads";
 import { addDuty as persistDuty, fetchActivity7d, fetchDuties, formatDue, setDutyDone } from "@/lib/duties";
 import { DocumentsHub } from "./DocumentsHub";
 import { SentinelOverview } from "./SentinelOverview";
@@ -56,6 +59,8 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
 
   // ── Live data (only fetched when live=true; demo uses hardcoded data) ──
   const [wards, setWards] = useState<WardRow[]>([]);
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [liveLogs, setLiveLogs] = useState<Record<string, CareLog[]>>({});
   const [liveSentinel, setLiveSentinel] = useState<SentinelProfile>(ME_SENTINEL);
   const [logCount7d, setLogCount7d] = useState(0);
@@ -292,6 +297,71 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
     reset();
   };
 
+  // Sign ward photo paths for the care view. The bucket is private; owners
+  // may read their own folder (storage RLS).
+  useEffect(() => {
+    if (!live || wards.length === 0) return;
+    const paths = Array.from(new Set(wards.flatMap((w) => w.images ?? [])));
+    const missing = paths.filter((p) => !photoUrls[p]);
+    if (missing.length === 0) return;
+    void (async () => {
+      const { data, error } = await supabase.storage
+        .from("ward-images")
+        .createSignedUrls(missing, 60 * 60);
+      if (error || !data) return;
+      const next: Record<string, string> = {};
+      data.forEach((d, i) => { if (d.signedUrl) next[missing[i]] = d.signedUrl; });
+      setPhotoUrls((prev) => ({ ...prev, ...next }));
+    })();
+  }, [live, wards, photoUrls, supabase]);
+
+  const addWardPhotos = async (ward: WardRow, files: File[]) => {
+    if (!live || !user || files.length === 0) return;
+    setPhotoBusy(true);
+    const uploaded: string[] = [];
+    try {
+      for (const file of files) {
+        const img = await sniffImage(file);
+        if (!img) throw new Error(`${file.name}: nur JPG/PNG/WebP/GIF/AVIF bis 10 MB.`);
+        const path = `${user.id}/${uploadId()}.${img.ext}`;
+        const { error } = await supabase.storage
+          .from("ward-images")
+          .upload(path, file, { contentType: img.mime, upsert: false });
+        if (error) throw error;
+        uploaded.push(path);
+      }
+      const next = [...(ward.images ?? []), ...uploaded];
+      const { error } = await supabase.from("ward_listings").update({ images: next }).eq("id", ward.id);
+      if (error) throw error;
+      setWards((prev) => prev.map((w) => (w.id === ward.id ? { ...w, images: next } : w)));
+      toast({ title: "Fotos gespeichert", description: "Nur für vetted Stewards sichtbar." });
+    } catch (e) {
+      if (uploaded.length > 0) {
+        await supabase.storage.from("ward-images").remove(uploaded).catch(() => {});
+      }
+      toast({
+        title: "Foto-Upload fehlgeschlagen",
+        description: e instanceof Error ? e.message : "Unbekannter Fehler",
+        variant: "destructive",
+      });
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const removeWardPhoto = async (ward: WardRow, path: string) => {
+    const next = (ward.images ?? []).filter((p) => p !== path);
+    setPhotoBusy(true);
+    const { error } = await supabase.from("ward_listings").update({ images: next }).eq("id", ward.id);
+    setPhotoBusy(false);
+    if (error) {
+      toast({ title: "Foto nicht entfernt", description: error.message, variant: "destructive" });
+      return;
+    }
+    setWards((prev) => prev.map((w) => (w.id === ward.id ? { ...w, images: next } : w)));
+    await supabase.storage.from("ward-images").remove([path]).catch(() => {});
+  };
+
   const [exporting, setExporting] = useState(false);
   const handleExport = async () => {
     if (!active) return;
@@ -512,6 +582,55 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
                   </Button>
                 </div>
               </div>
+
+              {live && activeWard && (
+                <div className="border-b border-border p-6">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="eyebrow flex items-center gap-2">
+                      <ImagePlus className="h-3 w-3" /> Fotos
+                    </span>
+                    <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                      {photoBusy ? "Speichere …" : `${activeWard.images?.length ?? 0} Bilder`}
+                    </span>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {(activeWard.images ?? []).map((path) => (
+                      <div key={path} className="relative h-20 w-24 overflow-hidden border border-border bg-muted">
+                        {photoUrls[path]
+                          ? <img src={photoUrls[path]} alt="Ward-Foto" loading="lazy" className="h-full w-full object-cover" />
+                          : <div className="h-full w-full animate-pulse bg-muted" />}
+                        <button
+                          type="button"
+                          disabled={photoBusy}
+                          onClick={() => void removeWardPhoto(activeWard, path)}
+                          aria-label="Foto entfernen"
+                          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center bg-background/90 text-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                    <label className={`flex h-20 w-24 cursor-pointer flex-col items-center justify-center gap-1 border border-dashed border-border bg-background text-muted-foreground transition-colors hover:border-primary hover:text-primary ${photoBusy ? "pointer-events-none opacity-50" : ""}`}>
+                      <ImagePlus className="h-4 w-4" />
+                      <span className="font-mono text-[9px] uppercase tracking-[0.15em]">Hinzufügen</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                          const files = e.target.files ? Array.from(e.target.files) : [];
+                          e.target.value = "";
+                          void addWardPhotos(activeWard, files);
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+                    Nur für vetted Stewards sichtbar.
+                  </p>
+                </div>
+              )}
 
               {/* Sub-tabs: Pflege-Log / Dokumente */}
               <div className="flex gap-px bg-border">

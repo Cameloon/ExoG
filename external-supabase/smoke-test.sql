@@ -95,3 +95,14 @@ where not exists (
 );
 
 -- (0 rows = a private column is still exposed through shelters)
+
+-- 8) Sentinel-side request dismissal column from 00033
+select 'ok' as result
+where exists (
+  select 1 from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'sentinel_shelter_requests'
+    and column_name = 'sentinel_hidden'
+);
+
+-- (0 rows = apply 00033_shelter_request_dismissal.sql)

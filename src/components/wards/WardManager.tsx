@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { sniffImage } from "@/lib/uploads";
+import { sniffImage, uploadId } from "@/lib/uploads";
 import { RegionSelect } from "@/components/RegionSelect";
 import { BUNDESLAENDER } from "@/lib/germanRegions";
 import { Plus, X, ImagePlus, PawPrint, MapPin } from "lucide-react";
@@ -161,7 +161,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
         toast({ title: "Ungültiges Bild", description: `${file.name}: nur JPG/PNG/WebP/GIF/AVIF bis 10 MB.`, variant: "destructive" });
         return;
       }
-      const path = `${user.id}/${crypto.randomUUID()}.${img.ext}`;
+      const path = `${user.id}/${uploadId()}.${img.ext}`;
       const { error: upErr } = await supabase.storage
         .from("ward-images").upload(path, file, { contentType: img.mime, upsert: false });
       if (upErr) {

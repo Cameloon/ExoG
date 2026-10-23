@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { fetchShelters } from "@/lib/shelters";
 import type { Shelter } from "@/lib/types";
 import { Building2, CheckCircle2, ImagePlus, PawPrint, X } from "lucide-react";
-import { sniffDocument } from "@/lib/uploads";
+import { sniffDocument, uploadId } from "@/lib/uploads";
 import { SpeciesInput } from "@/components/SpeciesInput";
 import { LoadingSnake } from "@/components/ui/loading-snake";
 import { consensusSpecies } from "@/lib/consensus";
@@ -157,7 +157,7 @@ const BehoerdeVerwaltung = () => {
       for (const file of idForm.photos) {
         const img = await sniffDocument(file);
         if (!img) throw new Error(`${file.name}: nur JPG/PNG/WebP/GIF/AVIF/PDF bis 10 MB.`);
-        const path = `${user.id}/${crypto.randomUUID()}.${img.ext}`;
+        const path = `${user.id}/${uploadId()}.${img.ext}`;
         const { error: upErr } = await supabase.storage
           .from("id-photos")
           .upload(path, file, { contentType: img.mime, upsert: false });

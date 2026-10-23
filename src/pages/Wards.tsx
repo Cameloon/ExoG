@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { sniffImage, sniffDocument } from "@/lib/uploads";
+import { sniffImage, sniffDocument, uploadId } from "@/lib/uploads";
 import { SpeciesInput } from "@/components/SpeciesInput";
 import { LoadingSnake } from "@/components/ui/loading-snake";
 import { ShieldCheck, Lock, AlertTriangle, Plus, X, ImagePlus, Truck, FileCheck2, Pencil, Search } from "lucide-react";
@@ -252,7 +252,11 @@ const Wards = () => {
   // Sign URLs whenever ward image paths change — only the paths the grid
   // actually renders (cover + 4 thumbs per ward), not entire galleries.
   useEffect(() => {
-    const allPaths = Array.from(new Set(wards.flatMap((w) => (w.images ?? []).slice(0, 5))));
+    const allPaths = Array.from(new Set([
+      ...wards.flatMap((w) => (w.images ?? []).slice(0, 5)),
+      // The edit form shows the full gallery, not just the cover+4 grid thumbs.
+      ...(editTarget?.images ?? []),
+    ]));
     const missing = allPaths.filter((p) => !signedUrls[p]);
     if (missing.length === 0) return;
     void (async () => {
@@ -266,7 +270,7 @@ const Wards = () => {
       });
       setSignedUrls((prev) => ({ ...prev, ...next }));
     })();
-  }, [wards, signedUrls, storage]);
+  }, [wards, editTarget, signedUrls, storage]);
 
   const loadWards = async (reset = false) => {
     setWardsLoading(true);
@@ -346,7 +350,7 @@ const Wards = () => {
         toast({ title: "Ungültiges Bild", description: `${file.name}: nur JPG/PNG/WebP/GIF/AVIF bis 10 MB.`, variant: "destructive" });
         return;
       }
-      const path = `${user.id}/${crypto.randomUUID()}.${img.ext}`;
+      const path = `${user.id}/${uploadId()}.${img.ext}`;
       const { error: upErr } = await supabase.storage
         .from("ward-images")
         .upload(path, file, { contentType: img.mime, upsert: false });
@@ -446,7 +450,7 @@ const Wards = () => {
       if (e.labFile) {
         const sniffed = await sniffDocument(e.labFile);
         if (!sniffed) throw new Error("Nur PDF/JPG/PNG/WebP/GIF/AVIF bis 10 MB.");
-        const path = `${user.id}/${wardId}/${crypto.randomUUID()}.${sniffed.ext}`;
+        const path = `${user.id}/${wardId}/${uploadId()}.${sniffed.ext}`;
         const { error: upErr } = await storage
           .from("lab-docs")
           .upload(path, e.labFile, { contentType: sniffed.mime, upsert: false });
@@ -763,7 +767,7 @@ const ApprovedView = ({
         )}
       </div>
 
-      {canCreate && showForm && (
+      {showForm && (
         <WardForm
           key={editTarget?.id ?? "new"}
           ward={editTarget}

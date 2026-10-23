@@ -371,9 +371,12 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
 
           {sentinel.enclosures.length > 0 ? (
             <>
-              <div className="grid grid-cols-3 gap-px bg-border md:grid-cols-6">
+              <div className="flex flex-wrap gap-px bg-border">
                 {sentinel.enclosures.map((e) => (
-                  <div key={e.id} className="group relative bg-surface">
+                  <div
+                    key={e.id}
+                    className="group relative min-w-[30%] flex-1 bg-surface md:min-w-[15%]"
+                  >
                     <button
                       onClick={() => e.occupiedBy && onJumpToCase(e.occupiedBy)}
                       disabled={!e.occupiedBy}

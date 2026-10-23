@@ -17,6 +17,7 @@ export type WardRow = {
   age_estimate: string | null;
   region: string | null;
   status: string | null;
+  images: string[];
 };
 
 const statusLabel: Record<string, string> = {
@@ -47,7 +48,7 @@ export async function fetchMyWards(client: Client, userId: string, page = 0, pag
   const from = page * pageSize;
   const { data, error } = await client
     .from("ward_listings")
-    .select("id, case_code, common_name, scientific_name, cites_listing, age_estimate, region, status")
+    .select("id, case_code, common_name, scientific_name, cites_listing, age_estimate, region, status, images")
     .eq("owner_id", userId)
     .order("created_at", { ascending: false })
     .range(from, from + pageSize - 1);
