@@ -238,7 +238,7 @@ export async function fetchWardInterests(
   const { data, error } = await supabase
     .from("ward_interest")
     .select("id, ward_id, applicant_id, message, consultation_requested, status, created_at, ward:ward_listings!inner(common_name, case_code)")
-    .eq("ward_listings.shelter_id", shelterId)
+    .eq("ward.shelter_id", shelterId)
     .order("created_at", { ascending: false })
     .limit(200);
   if (error) throw error;

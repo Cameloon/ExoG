@@ -4,7 +4,8 @@
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ClerkProvider } from "@clerk/clerk-react";
-import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { AuthProvider } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { EXTERNAL_CONFIG } from "@/config/external";
 import { PageLoader } from "@/components/ui/loading-snake";
 import { V2_CSS } from "@/lib/v2Theme";
@@ -83,6 +84,7 @@ const AppShellRoot = () => {
                 <Route path="/wards" element={<RequireAuth><Wards /></RequireAuth>} />
                 <Route path="/auth" element={<Auth />} />
                 <Route path="/behoerde" element={<RequireAuth><Behoerde /></RequireAuth>} />
+                <Route path="/sentinels" element={<RequireAuth><BehoerdeNetwork /></RequireAuth>} />
                 <Route path="/behoerde/network" element={<RequireAuth><BehoerdeNetwork /></RequireAuth>} />
                 <Route path="/behoerde/verwaltung" element={<RequireAuth><BehoerdeVerwaltung /></RequireAuth>} />
                 <Route path="/shelters" element={<RequireAuth><Shelters /></RequireAuth>} />

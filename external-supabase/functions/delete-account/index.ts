@@ -9,11 +9,9 @@
 //        transport_logs, change_log, role_change_log, and owned ward records
 // The Clerk user itself is deleted last via the Admin API.
 //
-// Server guarantees:
-//  - Clerk JWT verified (user can only delete their own id).
-//  - Every purge/delete step is ordered and aborts on failure so a retry can
-//    continue where it stopped; a partial state is always recoverable by
-//    re-running the same request (idempotent deletes).
+// Clerk binds the request to its verified caller. A service-only DB command
+// deletes/anonymizes database data in one transaction before files are purged.
+// Durable progress records allow retries after storage or Clerk outages.
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -84,10 +82,6 @@ async function rest(path: string, init?: RequestInit) {
   return fetch(`${SUPABASE_URL}${path}`, { headers: serviceHeaders, ...init });
 }
 
-async function del(path: string) {
-  return rest(path, { method: "DELETE" });
-}
-
 // Storage list API is POST with a JSON body; entries with id === null are folders.
 async function listStorage(bucket: string, prefix: string): Promise<{ name: string; id: string | null }[]> {
   const out: { name: string; id: string | null }[] = [];
@@ -106,18 +100,16 @@ async function listStorage(bucket: string, prefix: string): Promise<{ name: stri
   }
 }
 
-// Collects every object path under `${userId}/` in a bucket (two folder levels
-// are enough for the app's ${userId}/${id}/${file} scheme; deeper nesting is
-// flattened by listing with a recursive prefix).
+// Recurse through all nesting depths, including uploads made outside the UI.
 async function collectPaths(bucket: string, userId: string): Promise<string[]> {
   const paths: string[] = [];
-  for (const entry of await listStorage(bucket, `${userId}/`)) {
-    if (entry.id === null) {
-      for (const f of await listStorage(bucket, `${userId}/${entry.name}/`)) {
-        if (f.id !== null) paths.push(`${userId}/${entry.name}/${f.name}`);
-      }
-    } else {
-      paths.push(`${userId}/${entry.name}`);
+  const folders = [`${userId}/`];
+  while (folders.length) {
+    const prefix = folders.pop()!;
+    for (const entry of await listStorage(bucket, prefix)) {
+      const path = `${prefix}${entry.name}`;
+      if (entry.id === null) folders.push(`${path}/`);
+      else paths.push(path);
     }
   }
   return paths;
@@ -125,30 +117,21 @@ async function collectPaths(bucket: string, userId: string): Promise<string[]> {
 
 async function purgeBucket(bucket: string, userId: string): Promise<number> {
   const paths = await collectPaths(bucket, userId);
-  // Batch delete (single request, max 1000) — falls back per-object on error.
-  if (paths.length > 0) {
+  for (let start = 0; start < paths.length; start += 1000) {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}`, {
-      method: "DELETE",
-      headers: serviceHeaders,
-      body: JSON.stringify({ prefixes: paths }),
+      method: "DELETE", headers: serviceHeaders,
+      body: JSON.stringify({ prefixes: paths.slice(start, start + 1000) }),
     });
-    if (!res.ok) {
-      for (const p of paths) {
-        const one = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${p}`, { method: "DELETE", headers: serviceHeaders });
-        if (!one.ok) throw new Error(`storage delete failed: ${one.status}`);
-      }
-    }
+    if (!res.ok) throw new Error(`storage delete failed: ${res.status}`);
   }
   return paths.length;
 }
 
-async function anonymize(table: string, filter: string, body: Record<string, unknown>) {
-  const res = await rest(`/rest/v1/${table}?${filter}`, {
-    method: "PATCH",
-    headers: { ...serviceHeaders, Prefer: "return=minimal" },
-    body: JSON.stringify(body),
+async function markDeletion(userId: string, stage: string) {
+  const res = await rest(`/rest/v1/account_deletion_jobs?user_id=eq.${encodeURIComponent(userId)}`, {
+    method: "PATCH", body: JSON.stringify({ stage, updated_at: new Date().toISOString() }),
   });
-  if (!res.ok) throw new Error(`anonymize ${table} failed: ${res.status}`);
+  if (!res.ok) throw new Error(`deletion progress failed: ${res.status}`);
 }
 
 Deno.serve(async (req) => {
@@ -170,48 +153,19 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // 1) Storage purge — failure aborts: retaining ID documents after a
-    //    "deletion" is a GDPR Art. 17 violation.
-    const purged: Record<string, number> = {};
-    for (const bucket of ["kyc-documents", "ward-images", "id-photos", "lab-docs"]) {
-      purged[bucket] = await purgeBucket(bucket, userId);
-    }
-    console.log("[delete-account] storage purged", { userId, purged });
-
-    // 2) DB rows — FK-cascade order. Every failure aborts; each delete is
-    //    idempotent so a retry after a mid-sequence failure resumes safely.
-    // Keep Ward rows as anonymized custody records; deleting them would also
-    // cascade away the care and transport evidence attached to each Ward.
-    await anonymize("ward_listings", `owner_id=eq.${userId}`, {
-      owner_id: "deleted",
-      status: "withdrawn",
-      images: [],
-      lab_report_path: null,
+    // RPC completes atomically and fails before any storage removal if the
+    // migration/permissions are missing. Its durable stage makes retries safe.
+    const dbResult = await rest("/rest/v1/rpc/delete_account_data", {
+      method: "POST", body: JSON.stringify({ p_user_id: userId }),
     });
-    const rowDeletes: [string, string][] = [
-      ["application_documents", `user_id=eq.${userId}`],
-      ["sentinel_applications", `user_id=eq.${userId}`],
-      ["pending_shelter_requests", `user_id=eq.${userId}`],
-      ["sentinel_shelter_requests", `sentinel_id=eq.${userId}`],
-      ["ward_interest", `applicant_id=eq.${userId}`],
-      ["shelters", `owner_id=eq.${userId}`],
-      ["identification_requests", `created_by=eq.${userId}`],
-      ["sentinel_change_requests", `user_id=eq.${userId}`],
-      ["user_roles", `user_id=eq.${userId}`],
-      ["profiles", `id=eq.${userId}`],
-    ];
-    for (const [table, filter] of rowDeletes) {
-      const res = await del(`/rest/v1/${table}?${filter}`);
-      if (!res.ok) throw new Error(`db cleanup failed (${table}): ${res.status}`);
+    if (!dbResult.ok) throw new Error(`database cleanup failed: ${dbResult.status}`);
+    const stage = await dbResult.json();
+    if (stage === "database_deleted") {
+      for (const bucket of ["kyc-documents", "ward-images", "id-photos", "lab-docs"]) {
+        await purgeBucket(bucket, userId);
+      }
+      await markDeletion(userId, "storage_deleted");
     }
-
-    // 3) Anonymize rows that must survive as evidence (author/actor ids stay
-    //    — no longer linkable once the Clerk user is gone).
-    await anonymize("care_logs", `author_id=eq.${encodeURIComponent(userId)}`, { author_name: "Gelöschtes Konto" });
-    await anonymize("transport_logs", `handler_id=eq.${encodeURIComponent(userId)}`, { handler_id: "deleted" });
-    await anonymize("change_log", `actor_id=eq.${encodeURIComponent(userId)}`, { actor_id: "deleted" });
-    await anonymize("role_change_log", `actor_id=eq.${encodeURIComponent(userId)}`, { actor_id: "deleted" });
-    await anonymize("role_change_log", `target_user_id=eq.${encodeURIComponent(userId)}`, { target_user_id: "deleted" });
   } catch (e) {
     console.error("account deletion failed", e);
     return new Response(JSON.stringify({ error: `cleanup failed: ${(e as Error).message}` }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -222,10 +176,11 @@ Deno.serve(async (req) => {
     method: "DELETE",
     headers: { Authorization: `Bearer ${CLERK_SECRET}`, "Content-Type": "application/json" },
   });
-  if (!res.ok) {
+  if (!res.ok && res.status !== 404) {
     console.error("clerk delete failed:", res.status);
     return new Response(JSON.stringify({ error: "clerk delete failed, data already removed — retry or contact support" }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
+  await markDeletion(userId, "complete").catch((e) => console.error("deletion completion marker", e));
   return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 });

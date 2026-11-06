@@ -56,7 +56,7 @@ tab. For each function, click **"Create a new function"** (or open an existing
 one), paste the source from `external-supabase/functions/<name>/index.ts`, and
 deploy.
 
-Four functions to deploy/create:
+Six functions to deploy/create (see [REMEDIATION_DEPLOY.md](REMEDIATION_DEPLOY.md) for the retry schedule):
 
 | Function | Action | File |
 |----------|--------|------|
@@ -65,6 +65,7 @@ Four functions to deploy/create:
 | `send-application-confirmation` | Create (or update if it exists) | `external-supabase/functions/send-application-confirmation/index.ts` |
 | `submit-sentinel-application` | Create (or update if it exists) | `external-supabase/functions/submit-sentinel-application/index.ts` |
 | `set-user-role` | Create | `external-supabase/functions/set-user-role/index.ts` |
+| `retry-application-confirmations` | Create and schedule | `external-supabase/functions/retry-application-confirmations/index.ts` |
 
 ### Secrets
 

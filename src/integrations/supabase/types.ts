@@ -187,7 +187,7 @@ export type Database = {
         Row: {
           action: string
           actor_id: string | null
-          application_id: string
+          application_id: string | null
           created_at: string
           from_status: Database["public"]["Enums"]["application_status"] | null
           id: string
@@ -197,7 +197,7 @@ export type Database = {
         Insert: {
           action: string
           actor_id?: string | null
-          application_id: string
+          application_id?: string | null
           created_at?: string
           from_status?: Database["public"]["Enums"]["application_status"] | null
           id?: string
@@ -207,7 +207,7 @@ export type Database = {
         Update: {
           action?: string
           actor_id?: string | null
-          application_id?: string
+          application_id?: string | null
           created_at?: string
           from_status?: Database["public"]["Enums"]["application_status"] | null
           id?: string
@@ -307,6 +307,8 @@ export type Database = {
         Row: {
           capacity: string
           case_id: string
+          confirmation_status: "staging" | "pending" | "sent"
+          confirmation_next_attempt_at: string
           created_at: string
           email: string
           experience_years: number
@@ -330,6 +332,8 @@ export type Database = {
         Insert: {
           capacity: string
           case_id: string
+          confirmation_status?: "staging" | "pending" | "sent"
+          confirmation_next_attempt_at?: string
           created_at?: string
           email: string
           experience_years: number
@@ -352,6 +356,8 @@ export type Database = {
         Update: {
           capacity?: string
           case_id?: string
+          confirmation_status?: "staging" | "pending" | "sent"
+          confirmation_next_attempt_at?: string
           created_at?: string
           email?: string
           experience_years?: number
@@ -881,6 +887,14 @@ export type Database = {
       }
     }
     Functions: {
+      can_browse_sentinels: { Args: Record<string, never>; Returns: boolean }
+      sentinel_region_counts: { Args: Record<string, never>; Returns: { region: string; total: number }[] }
+      list_sentinels: {
+        Args: { p_after?: string; p_limit?: number; p_search?: string; p_user_ids?: string[] }
+        Returns: { user_id: string; case_id: string; full_name: string; email: string; region: string; experience_years: number; species_focus: string | null; capacity: string; motivation: string; tier: string; status: string; created_at: string; pledge_data: Json }[]
+      }
+      review_sentinel_change: { Args: { p_id: string; p_approve: boolean }; Returns: undefined }
+
       append_care_log: {
         Args: {
           p_ward_id: string

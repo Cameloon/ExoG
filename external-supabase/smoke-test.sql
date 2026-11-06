@@ -95,3 +95,21 @@ where not exists (
 );
 
 -- (0 rows = a private column is still exposed through shelters)
+
+-- 8) Remediation commands, queue and deletion audit compatibility.
+select 'ok' as result
+where to_regprocedure('public.list_sentinels(text,integer,text,text[])') is not null
+  and to_regprocedure('public.review_sentinel_change(uuid,boolean)') is not null
+  and to_regprocedure('public.delete_account_data(text)') is not null
+  and to_regclass('public.account_deletion_jobs') is not null
+  and exists (select 1 from information_schema.columns where table_schema='public'
+    and table_name='application_audit_log' and column_name='application_id' and is_nullable='YES')
+  and not has_table_privilege('authenticated','public.sentinel_applications','INSERT')
+  and not has_function_privilege('authenticated','public.delete_account_data(text)','EXECUTE')
+  and has_function_privilege('service_role','public.delete_account_data(text)','EXECUTE');
+
+-- 9) No direct relationship-based or government full-application read path.
+select 'ok' as result where not exists (
+  select 1 from pg_policies where schemaname='public' and tablename='sentinel_applications'
+    and policyname in ('Apps: shelter select applicants','Apps: behoerde select region','Apps: own insert')
+);

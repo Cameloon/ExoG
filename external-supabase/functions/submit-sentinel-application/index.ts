@@ -182,6 +182,10 @@ function validatePayload(input: unknown): Payload {
     if (result.length > max) throw new Error(`${key} too long`);
     return result;
   };
+  const optionalText = (value: unknown, key: string, max: number) => {
+    if (value == null || value === "") return "";
+    return text(value, key, max);
+  };
   const requiredStrings: (keyof Payload)[] = ["fullName", "region", "species", "capacity", "vetContact", "motivation"];
   const maxByKey: Record<string, number> = { fullName: 160, region: 120, species: 500, capacity: 1000, vetContact: 240, motivation: 5000 };
   for (const key of requiredStrings) text(p[key], String(key), maxByKey[String(key)]);
@@ -246,12 +250,12 @@ function validatePayload(input: unknown): Payload {
     birth_date: q!.birth_date,
     enclosure: enc,
     enclosures,
-    current_stock: text(q!.current_stock ?? "", "questionnaire.current_stock", 3000),
+    current_stock: optionalText(q!.current_stock ?? "", "questionnaire.current_stock", 3000),
     feeding: text(q!.feeding, "questionnaire.feeding", 3000),
-    overwintering: text(q!.overwintering ?? "", "questionnaire.overwintering", 2000),
+    overwintering: optionalText(q!.overwintering ?? "", "questionnaire.overwintering", 2000),
     info_sources: Array.isArray(q!.info_sources) ? q!.info_sources.map((s) => text(String(s), "questionnaire.info_sources", 240)).filter(Boolean).slice(0, 12) : [],
     sachkunde,
-    sachkunde_detail: (q!.sachkunde_detail ?? "").trim(),
+    sachkunde_detail: optionalText(q!.sachkunde_detail, "questionnaire.sachkunde_detail", 200),
   };
   if (questionnaire.info_sources.length === 0) throw new Error("missing questionnaire.info_sources");
   return {
@@ -413,10 +417,11 @@ async function sendConfirmation(email: string, fullName: string, caseId: string)
   if (!BREVO_API_KEY) {
     const at = email.indexOf("@");
     console.log("[email] no BREVO_API_KEY, logged only", { to: at > 1 ? `${email[0]}***@${email.slice(at + 1)}` : "***", caseId });
-    return;
+    return false;
   }
   const res = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
+    signal: AbortSignal.timeout(10_000),
     headers: { "api-key": BREVO_API_KEY, "content-type": "application/json" },
     body: JSON.stringify({
       sender: SENDER,
@@ -429,6 +434,7 @@ async function sendConfirmation(email: string, fullName: string, caseId: string)
     console.error("[email] brevo failed", res.status, await res.text());
     throw new Error("email failed");
   }
+  return true;
 }
 
 Deno.serve(async (req) => {
@@ -471,6 +477,7 @@ Deno.serve(async (req) => {
   }
 
   let applicationId: string | null = null;
+  let committed = false;
   const uploadedPaths: string[] = [];
 
   try {
@@ -502,13 +509,29 @@ Deno.serve(async (req) => {
       docs.push({ slot, ...uploaded });
     }
     await insertDocumentRows(app.id, userId, docs);
-    await sendConfirmation(email, payload.fullName, app.case_id);
+    // Commit the durable notification queue before attempting the provider.
+    // A provider outage must never roll back a valid application or its files.
+    const queued = await rest(`/rest/v1/sentinel_applications?id=eq.${app.id}`, {
+      method: "PATCH", body: JSON.stringify({ confirmation_status: "pending" }),
+    });
+    if (!queued.ok) throw new Error(`notification queue failed: ${queued.status}`);
+    committed = true;
+    try {
+      if (await sendConfirmation(email, payload.fullName, app.case_id)) {
+        const marked = await rest(`/rest/v1/sentinel_applications?id=eq.${app.id}`, {
+          method: "PATCH", body: JSON.stringify({ confirmation_status: "sent" }),
+        });
+        if (!marked.ok) console.error("confirmation status update failed", marked.status);
+      }
+    } catch (error) {
+      console.error("confirmation queued for retry", app.case_id, error instanceof Error ? error.message : "provider error");
+    }
 
     return new Response(JSON.stringify({ ok: true, id: app.id, caseId: app.case_id }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    await cleanup(applicationId, uploadedPaths);
+    if (!committed) await cleanup(applicationId, uploadedPaths);
     const message = e instanceof Error ? e.message : "submission failed";
     console.error("[submit-sentinel-application]", message);
     const status = message.includes("409")

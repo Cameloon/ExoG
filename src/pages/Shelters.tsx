@@ -1,7 +1,8 @@
+import { fetchSentinels } from "@/lib/sentinel-directory";
 import { useEffect, useState, useCallback } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useExternalSupabase } from "@/integrations/external/supabase";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Button } from "@/components/ui/button";
@@ -122,11 +123,7 @@ const Shelters = () => {
           ...i.map((x) => x.applicant_id),
         ])];
         if (ids.length > 0) {
-          const { data } = await supabase
-            .from("sentinel_applications")
-            .select("user_id, full_name, email, region, experience_years, species_focus, capacity, motivation, status, created_at, pledge_data")
-            .in("user_id", ids)
-            .order("created_at", { ascending: false });
+          const data = await fetchSentinels(supabase, ids);
           const map: Record<string, ApplicantApp> = {};
           for (const a of (data ?? []) as (ApplicantApp & { user_id: string })[]) {
             if (!map[a.user_id]) map[a.user_id] = a; // latest application per user

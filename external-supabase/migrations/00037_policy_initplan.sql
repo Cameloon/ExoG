@@ -228,4 +228,8 @@ $$;
 
 -- ── 5) Trigger/event-trigger functions need no caller grants ───────────
 revoke execute on function public.log_change() from public, authenticated;
-revoke execute on function public.rls_auto_enable() from public, authenticated;
+do $$ begin
+  if to_regprocedure('public.rls_auto_enable()') is not null then
+    execute 'revoke execute on function public.rls_auto_enable() from public, authenticated';
+  end if;
+end $$;

@@ -62,4 +62,4 @@ create policy "CITES: public select"
 
 -- Grant access to service_role (used by sb_secret_ keys for seed scripts)
 grant all on public.cites_species to service_role;
-grant all on public.cites_species_id_seq to service_role;
+-- IDs are imported integers; this table has no sequence.

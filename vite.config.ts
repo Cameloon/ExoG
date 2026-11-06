@@ -5,7 +5,7 @@ import path from "path";
 
 export default defineConfig(() => ({
   server: {
-    host: true,
+    host: "127.0.0.1",
     port: 8080,
     strictPort: true,
     hmr: {
@@ -30,18 +30,7 @@ export default defineConfig(() => ({
     ],
   },
 
-  build: {
-    rollupOptions: {
-      output: {
-        // Stable, cacheable vendor chunks — otherwise the mixed main chunk
-        // (~190 kB gz) re-downloads on every deploy.
-        manualChunks: {
-          "react-vendor": ["react", "react-dom", "react-router-dom", "react-hook-form"],
-          clerk: ["@clerk/clerk-react"],
-          supabase: ["@supabase/supabase-js"],
-          charts: ["jspdf", "jszip"],
-        },
-      },
-    },
-  },
+  // Let Rollup place shared helpers independently of optional auth/export code.
+  // The manifest regression check guards the public static dependency graph.
+  build: { manifest: true },
 }));

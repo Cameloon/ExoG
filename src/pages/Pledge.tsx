@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { Download, FileSignature, RotateCcw, ShieldCheck } from "lucide-react";
 import { z } from "zod";
@@ -56,7 +56,7 @@ type SignedPledge = {
 const schema = z.object({
   signedName: z.string().trim().min(2, "Name erforderlich").max(120),
   accepted: z.literal(true, {
-    errorMap: () => ({ message: "Bitte alle Punkte bestätigen." }),
+    error: "Bitte alle Punkte bestätigen.",
   }),
 });
 

@@ -15,7 +15,7 @@ Clerk allowed-origins/domain list, and the edge function secret `APP_ORIGIN`.
 | React SPA (static build) | VPS, `/var/www/exog/`, served by nginx |
 | Database, RLS, file storage | Supabase (SaaS, EU region) |
 | Auth, sessions, roles | Clerk (SaaS) |
-| 5 edge functions | Supabase |
+| 6 edge functions | Supabase |
 
 This app is **static-only on the box** — no app port, no systemd unit, no
 hardening drop-in, no `/var/lib` data dir, no `.env` on the server. Nothing to
@@ -35,7 +35,7 @@ Postgres patching, GoTrue and storage at once.
 
 - [ ] Create the project in **eu-central-1** or **eu-west-1** (your
       `docs/08_Cloud_C5_Hosting.md` claims EU processing).
-- [ ] Migrations: on a **fresh** project run `external-supabase/migrations/00001…00037.sql`
+- [ ] Migrations: on a **fresh** project run `external-supabase/migrations/00001…00038.sql`
       in filename order, then `smoke-test.sql` — every block must return `ok`.
 
 > ⚠️ **`SETUP.md` §3 said "each file is idempotent, so re-running one is safe". That was false**
@@ -117,9 +117,11 @@ Postgres patching, GoTrue and storage at once.
 - [ ] MFA on the Clerk dashboard account. Whoever controls the JWT template
       controls what `app_role` the database trusts — i.e. DB admin.
 
+For the security/performance release and the confirmation retry schedule, also follow [REMEDIATION_DEPLOY.md](REMEDIATION_DEPLOY.md).
+
 ## 3. Edge functions
 
-- [ ] Deploy all five from `external-supabase/functions/` (dashboard or CLI,
+- [ ] Deploy all six from `external-supabase/functions/` (dashboard or CLI,
       `--no-verify-jwt`; each verifies the Clerk token itself).
 - [ ] Secrets (shared):
 

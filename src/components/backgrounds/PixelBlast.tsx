@@ -402,7 +402,7 @@ const PixelBlast: React.FC<PixelBlastProps> = ({
       uEdgeFade: { value: number };
     };
     resizeObserver?: ResizeObserver;
-    raf?: number;
+    dispose: () => void;
     quad?: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
     timeOffset?: number;
     composer?: EffectComposer;
@@ -426,18 +426,8 @@ const PixelBlast: React.FC<PixelBlastProps> = ({
         }
     }
     if (mustReinit) {
-      if (threeRef.current) {
-        const t = threeRef.current;
-        t.resizeObserver?.disconnect();
-        cancelAnimationFrame(t.raf!);
-        t.quad?.geometry.dispose();
-        t.material.dispose();
-        t.composer?.dispose();
-        t.renderer.dispose();
-        t.renderer.forceContextLoss();
-        if (t.renderer.domElement.parentElement === container) container.removeChild(t.renderer.domElement);
-        threeRef.current = null;
-      }
+      threeRef.current?.dispose();
+      threeRef.current = null;
       const canvas = document.createElement('canvas');
       const renderer = new THREE.WebGLRenderer({
         canvas,
@@ -581,7 +571,9 @@ const PixelBlast: React.FC<PixelBlastProps> = ({
         passive: true
       });
       let raf = 0;
+      let stopped = false;
       const animate = () => {
+        if (stopped) return;
         if (autoPauseOffscreen && !visibilityRef.current.visible) {
           raf = requestAnimationFrame(animate);
           return;
@@ -617,7 +609,20 @@ const PixelBlast: React.FC<PixelBlastProps> = ({
         clickIx: 0,
         uniforms,
         resizeObserver: ro,
-        raf,
+        dispose: () => {
+          stopped = true;
+          cancelAnimationFrame(raf);
+          ro.disconnect();
+          renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+          renderer.domElement.removeEventListener('pointermove', onPointerMove);
+          quadGeom.dispose();
+          material.dispose();
+          touch?.texture.dispose();
+          composer?.dispose();
+          renderer.dispose();
+          renderer.forceContextLoss();
+          renderer.domElement.remove();
+        },
         quad,
         timeOffset,
         composer,
@@ -649,20 +654,7 @@ const PixelBlast: React.FC<PixelBlastProps> = ({
       if (t.touch) t.touch.radiusScale = liquidRadius;
     }
     prevConfigRef.current = cfg;
-    return () => {
-      if (threeRef.current && mustReinit) return;
-      if (!threeRef.current) return;
-      const t = threeRef.current;
-      t.resizeObserver?.disconnect();
-      cancelAnimationFrame(t.raf!);
-      t.quad?.geometry.dispose();
-      t.material.dispose();
-      t.composer?.dispose();
-      t.renderer.dispose();
-      t.renderer.forceContextLoss();
-      if (t.renderer.domElement.parentElement === container) container.removeChild(t.renderer.domElement);
-      threeRef.current = null;
-    };
+
   }, [
     antialias,
     liquid,
@@ -685,6 +677,13 @@ const PixelBlast: React.FC<PixelBlastProps> = ({
     color,
     speed
   ]);
+
+  // A uniform update must not tear down the renderer, but every unmount must.
+  useEffect(() => () => {
+    threeRef.current?.dispose();
+    threeRef.current = null;
+    prevConfigRef.current = null;
+  }, []);
 
   // Offscreen pause: the shader runs at 60fps; stop rendering while the
   // container is out of view (previously visibilityRef was never written).

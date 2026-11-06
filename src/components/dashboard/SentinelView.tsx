@@ -20,11 +20,13 @@ import {
 import { CASES, CARE_LOGS, ME_SENTINEL, DUTIES, ACTIVITY_7D, type CareLog, type Duty, type DutyPriority, type EnclosureSlot, type SentinelProfile } from "@/lib/dashboard-data";
 import { RATIONALE_RULES, validateRationale, sign } from "@/lib/care-log-validation";
 import { toast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import {
   addCareLog,
   fetchAllCareLogs,
+  fetchCareLogPage,
+  type CareLogCursor,
   fetchLiveSentinelProfile,
   fetchMyWards,
   wardToCase,
@@ -56,6 +58,11 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
 
   // ── Live data (only fetched when live=true; demo uses hardcoded data) ──
   const [wards, setWards] = useState<WardRow[]>([]);
+  const [logPagination, setLogPagination] = useState<{ ward: string; cursors: (CareLogCursor | null)[] }>({ ward: "", cursors: [null] });
+  const [nextLogCursor, setNextLogCursor] = useState<CareLogCursor | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const [logRevision, setLogRevision] = useState(0);
   const [liveLogs, setLiveLogs] = useState<Record<string, CareLog[]>>({});
   const [liveSentinel, setLiveSentinel] = useState<SentinelProfile>(ME_SENTINEL);
   const [logCount7d, setLogCount7d] = useState(0);
@@ -208,18 +215,19 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
   const activeWard = live ? wards.find((w) => w.case_code === activeId) : undefined;
   const activeLogs = live ? liveLogs[activeId] ?? [] : logs[activeId] ?? [];
 
-  // Load a ward's log history lazily on first select (live only).
+  const wardId = activeWard?.id;
+  const logCursors = logPagination.ward === wardId ? logPagination.cursors : [null];
+  const logCursor = logCursors[logCursors.length - 1];
   useEffect(() => {
-    if (!live || !activeWard || liveLogs[activeId]) return;
-    void (async () => {
-      try {
-        const l = await fetchAllCareLogs(supabase, activeWard.id);
-        setLiveLogs((p) => ({ ...p, [activeId]: l }));
-      } catch (e) {
-        toast({ title: "Log-Verlauf nicht ladbar", description: (e as Error).message, variant: "destructive" });
-      }
-    })();
-  }, [live, activeId, activeWard, liveLogs, supabase]);
+    if (!live || !wardId) return;
+    const controller = new AbortController();
+    setLogsLoading(true); setLogsError(null); setLiveLogs({}); setNextLogCursor(null);
+    void fetchCareLogPage(supabase, wardId, logCursor, 50, controller.signal)
+      .then((page) => { if (!controller.signal.aborted) { setLiveLogs({ [activeId]: page.logs }); setNextLogCursor(page.next); } })
+      .catch((e) => { if (!controller.signal.aborted) setLogsError(e.message); })
+      .finally(() => { if (!controller.signal.aborted) setLogsLoading(false); });
+    return () => controller.abort();
+  }, [live, wardId, activeId, logCursor, logRevision, supabase]);
 
   const reset = () => {
     setNote("");
@@ -259,7 +267,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
       if (!activeWard || !user) return;
       setSaving(true);
       try {
-        const entry = await addCareLog(supabase, {
+        await addCareLog(supabase, {
           wardId: activeWard.id,
           authorName: sentinel.name,
           type,
@@ -267,7 +275,8 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
           rationale: rationale.trim(),
           metrics,
         });
-        setLiveLogs((p) => ({ ...p, [activeId]: [entry, ...(p[activeId] ?? [])] }));
+        setLogPagination({ ward: activeWard.id, cursors: [null] });
+        setLogRevision((v) => v + 1);
         setLogCount7d((c) => c + 1);
         reset();
       } catch (e) {
@@ -293,24 +302,31 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
   };
 
   const [exporting, setExporting] = useState(false);
+  const exportAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => exportAbort.current?.abort(), []);
   const handleExport = async () => {
     if (!active) return;
     try {
       setExporting(true);
+      const controller = new AbortController();
+      exportAbort.current = controller;
+      const exportLogs = live && activeWard ? await fetchAllCareLogs(supabase, activeWard.id, 500, controller.signal) : activeLogs;
+      controller.signal.throwIfAborted();
       const { exportCareLogsZip } = await import("@/lib/care-log-export");
       await exportCareLogsZip({
         caseRecord: active,
-        logs: activeLogs,
+        logs: exportLogs,
         sentinel,
       });
-      const nonCompliant = activeLogs.filter(
+      const nonCompliant = exportLogs.filter(
         (l) => !validateRationale(l.type, l.rationale ?? "", l.metrics).ok,
       ).length;
       toast({
         title: "Export erstellt",
-        description: `${activeLogs.length} Einträge · ${nonCompliant} nicht konform · ZIP-Download gestartet`,
+        description: `${exportLogs.length} Einträge · ${nonCompliant} nicht konform · ZIP-Download gestartet`,
       });
     } catch (e) {
+      if (exportAbort.current?.signal.aborted) return;
       toast({
         title: "Export fehlgeschlagen",
         description: e instanceof Error ? e.message : "Unbekannter Fehler",
@@ -705,7 +721,14 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
               </div>
 
               <div className="p-6">
-                <span className="eyebrow">Verlauf · {activeLogs.length}</span>
+                <span className="eyebrow">Verlauf · {activeLogs.length} Einträge auf dieser Seite</span>
+                {logsLoading && <LoadingSnake label="Lade Verlauf" compact />}
+                {logsError && <p role="alert" className="text-destructive">{logsError}</p>}
+                {live && <div className="mt-3 flex gap-3">
+                  <Button size="sm" variant="outline" disabled={logsLoading || logCursors.length < 2} onClick={() => setLogPagination({ ward: wardId!, cursors: logCursors.slice(0,-1) })}>Neuere</Button>
+                  <Button size="sm" variant="outline" disabled={logsLoading || !nextLogCursor} onClick={() => setLogPagination({ ward: wardId!, cursors: [...logCursors, nextLogCursor] })}>Ältere</Button>
+                  {exporting && <Button size="sm" variant="outline" onClick={() => exportAbort.current?.abort()}>Export abbrechen</Button>}
+                </div>}
                 <ul className="mt-4 space-y-4">
                   {activeLogs.map((l, i) => (
                     <li key={i} className="border-l-2 border-primary/40 pl-3">
@@ -763,7 +786,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
                       </div>
                     </li>
                   ))}
-                  {activeLogs.length === 0 && (
+                  {activeLogs.length === 0 && !logsLoading && !logsError && (
                     <li className="font-mono text-xs text-muted-foreground">Noch keine Einträge.</li>
                   )}
                 </ul>

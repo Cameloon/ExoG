@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Navigate } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SentinelView } from "@/components/dashboard/SentinelView";

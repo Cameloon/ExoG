@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useSignIn, useSignUp } from "@clerk/clerk-react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { SiteHeader } from "@/components/SiteHeader";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { useSentinelApplication } from "@/hooks/useSentinelApplication";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

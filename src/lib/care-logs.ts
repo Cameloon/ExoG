@@ -50,12 +50,14 @@ export async function fetchMyWards(client: Client, userId: string, page = 0, pag
     .select("id, case_code, common_name, scientific_name, cites_listing, age_estimate, region, status")
     .eq("owner_id", userId)
     .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
     .range(from, from + pageSize - 1);
   if (error) throw error;
   return (data ?? []) as WardRow[];
 }
 
 type LogRow = {
+  id: string;
   ward_id: string;
   author_name: string;
   type: string;
@@ -89,23 +91,42 @@ export async function fetchCareLogs(client: Client, wardId: string, page = 0, pa
     .select("ward_id, author_name, type, note, rationale, metrics, hash, created_at")
     .eq("ward_id", wardId)
     .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
     .range(from, from + pageSize - 1);
   if (error) throw error;
   return ((data ?? []) as LogRow[]).map(toCareLog);
 }
 
-/**
- * All logs for a ward, looping pages until exhausted. The care log is the
- * audit document — silently truncating at 200 rows hides evidence from the
- * UI and the export.
- */
-export async function fetchAllCareLogs(client: Client, wardId: string, pageSize = 200): Promise<CareLog[]> {
+export type CareLogCursor = { createdAt: string; id: string };
+export async function fetchCareLogPage(client: Client, wardId: string, cursor: CareLogCursor | null = null,
+  pageSize = 50, signal?: AbortSignal): Promise<{ logs: CareLog[]; next: CareLogCursor | null }> {
+  const size = Math.max(1, Math.min(pageSize, 500));
+  let query = client.from("care_logs")
+    .select("id, ward_id, author_name, type, note, rationale, metrics, hash, created_at")
+    .eq("ward_id", wardId)
+    .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(size + 1);
+  if (cursor) query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
+  if (signal) query = query.abortSignal(signal);
+  const { data, error } = await query;
+  if (error) throw error;
+  const rows = (data ?? []) as LogRow[];
+  const visible = rows.slice(0, size);
+  const last = visible[visible.length - 1];
+  return { logs: visible.map(toCareLog), next: rows.length > size && last ? { createdAt: last.created_at, id: last.id } : null };
+}
+
+// Only explicit exports load the complete history. A timestamp + UUID cursor
+// handles tied timestamps and new inserts without offset duplicates/skips.
+export async function fetchAllCareLogs(client: Client, wardId: string, pageSize = 500, signal?: AbortSignal): Promise<CareLog[]> {
   const out: CareLog[] = [];
-  for (let page = 0; ; page++) {
-    const rows = await fetchCareLogs(client, wardId, page, pageSize);
-    out.push(...rows);
-    if (rows.length < pageSize) return out;
-  }
+  let cursor: CareLogCursor | null = null;
+  do {
+    signal?.throwIfAborted();
+    const page = await fetchCareLogPage(client, wardId, cursor, pageSize, signal);
+    out.push(...page.logs);
+    cursor = page.next;
+  } while (cursor);
+  return out;
 }
 
 export type NewCareLog = {

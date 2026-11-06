@@ -5,13 +5,13 @@ import { Menu } from "lucide-react";
 import { Logo } from "./Logo";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export const SiteHeader = () => {
   const { t } = useTranslation();
   const location = useLocation();
-  const { user, isAdmin, isBehoerde, isEinrichtung, role, signOut } = useAuth();
+  const { user, isAdmin, isBehoerde, isEinrichtung, canBrowseSentinels, role, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // Logged-out: public landing/marketing nav. Logged-in: role-based app nav
@@ -28,7 +28,7 @@ export const SiteHeader = () => {
   const appNav = [
     ...(isBehoerde ? [
       { href: "/behoerde", label: "Dashboard", type: "route" as const },
-      { href: "/behoerde/network", label: "Network", type: "route" as const },
+      { href: "/sentinels", label: "Network", type: "route" as const },
       { href: "/behoerde/verwaltung", label: "Verwaltung", type: "route" as const },
     ] : []),
     ...(isEinrichtung ? [
@@ -44,6 +44,7 @@ export const SiteHeader = () => {
     ...(role === "user" ? [
       { href: "/sentinel/apply", label: "Registrierung", type: "route" as const },
     ] : []),
+    ...(canBrowseSentinels && !isBehoerde ? [{ href: "/sentinels", label: "Sentinels finden", type: "route" as const }] : []),
     ...(isAdmin ? [{ href: "/admin", label: t("nav.admin"), type: "route" as const }] : []),
     ...(user ? [{ href: "/account", label: t("nav.account"), type: "route" as const }] : []),
   ];

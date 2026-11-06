@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LoadingSnake } from "@/components/ui/loading-snake";
@@ -72,7 +72,7 @@ export const SentinelChangePanel = () => {
     }
     setSaving(true);
     try {
-      const { error } = await supabase.from("sentinel_change_requests").insert({
+      const { data: submitted, error } = await supabase.from("sentinel_change_requests").insert({
         user_id: user.id,
         requested: {
           street: form.street.trim(),
@@ -80,8 +80,9 @@ export const SentinelChangePanel = () => {
           zip: form.zip.trim(),
           city: form.city.trim(),
         },
-      });
+      }).select("id").single();
       if (error) throw error;
+      setPendingId(submitted.id);
       toast({ title: "Änderung beantragt", description: "Ein Admin prüft die neuen Daten. Bis zur Freigabe bleibt die alte Adresse aktiv." });
       setLastStatus("pending");
     } catch (e) {

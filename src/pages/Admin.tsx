@@ -3,7 +3,7 @@ import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { EXTERNAL_CONFIG } from "@/config/external";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
@@ -217,44 +217,7 @@ const Admin = () => {
     if (!user) return;
     setChangeBusy(true);
     try {
-      if (approve) {
-        const { data: app, error: appErr } = await supabase
-          .from("sentinel_applications")
-          .select("user_id, pledge_data")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (appErr) throw appErr;
-        if (!app) throw new Error("Kein Sentinel-Antrag für diesen Nutzer gefunden.");
-        const pledge = (app.pledge_data ?? {}) as { questionnaire?: Record<string, unknown> };
-        const req = changeReqs.find((r) => r.id === id) as { requested: Record<string, unknown> } | undefined;
-        if (!req) throw new Error("Request not found");
-        const { error: upErr } = await supabase
-          .from("sentinel_applications")
-          .update({
-            pledge_data: {
-              ...pledge,
-              questionnaire: {
-                ...(pledge.questionnaire ?? {}),
-                street: (req.requested?.street as string) ?? "",
-                house_number: (req.requested?.house_number as string) ?? "",
-                zip: (req.requested?.zip as string) ?? "",
-                city: (req.requested?.city as string) ?? "",
-              },
-            },
-          })
-          .eq("user_id", userId);
-        if (upErr) throw upErr;
-      }
-      const { error } = await supabase
-        .from("sentinel_change_requests")
-        .update({
-          status: approve ? "approved" : "rejected",
-          reviewed_by: user.id,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq("id", id);
+      const { error } = await supabase.rpc("review_sentinel_change", { p_id: id, p_approve: approve });
       if (error) throw error;
       toast({ title: approve ? "Adresse übernommen" : "Änderung abgelehnt" });
       await loadChangeReqs();

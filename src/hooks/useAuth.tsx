@@ -11,47 +11,12 @@
  * Admin role is read from Clerk metadata or the database role table, matching
  * the setup runbook and the RLS policies.
  */
-import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import { useUser, useClerk, useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 
-export interface AuthUser {
-  id: string;
-  email: string | null;
-  displayName: string | null;
-  emailVerified: boolean;
-}
-
-export type AppRole = "admin" | "behoerde" | "einrichtung" | "sentinel" | "user";
-
-interface AuthContextValue {
-  user: AuthUser | null;
-  isAdmin: boolean;
-  isBehoerde: boolean;
-  isEinrichtung: boolean;
-  isSentinel: boolean;
-  /** Top-tier sentinel (S4) — may vote in the Bestimmungshilfe queue. */
-  isExpert: boolean;
-  /** The user's responsible region/area (Behörde scope, shelter region). */
-  region: string | null;
-  /** Coarse role used for routing/guards. */
-  role: AppRole;
-  loading: boolean;
-  signOut: () => Promise<void>;
-}
-
-  const AuthContext = createContext<AuthContextValue>({
-  user: null,
-  isAdmin: false,
-  isBehoerde: false,
-  isEinrichtung: false,
-  isSentinel: false,
-  isExpert: false,
-  region: null,
-  role: "user",
-  loading: false,
-  signOut: async () => {},
-});
+import { AuthContext, type AuthContextValue, type AppRole } from "./auth-context";
+export type { AuthUser, AppRole } from "./auth-context";
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const { isLoaded: userLoaded, user: clerkUser } = useUser();
@@ -200,6 +165,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return {
         user: null,
         isAdmin: false,
+        canBrowseSentinels: false,
         isBehoerde: false,
         isEinrichtung: approvedShelter,
         isSentinel: false,
@@ -248,6 +214,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           clerkUser.primaryEmailAddress?.verification?.status === "verified",
       },
       isAdmin,
+      canBrowseSentinels: isAdmin || isBehoerde || isEinrichtung || approvedShelter,
       isBehoerde,
       isEinrichtung,
       isSentinel,
@@ -262,5 +229,3 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [userLoaded, authLoaded, clerkUser, clerk, approvedShelter, sentinelApproved, sentinelTier, databaseAdmin, profileRegion, accessLoading, profileRegionLoading]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
-
-export const useAuth = () => useContext(AuthContext);

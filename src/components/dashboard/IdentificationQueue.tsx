@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { SpeciesInput } from "@/components/SpeciesInput";

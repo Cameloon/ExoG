@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { GlowMap } from "@/components/GlowMap";
 import { mapRegionToState } from "@/lib/regionMap";
@@ -7,39 +7,16 @@ import { geocode } from "@/lib/geocode";
 // bklit/visx (~180 kB) nur laden, wenn der Deutschland-Tab geöffnet wird.
 const GermanyMap = lazy(() => import("@/components/GermanyMap").then((m) => ({ default: m.GermanyMap })));
 import { useExternalSupabase } from "@/integrations/external/supabase";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Button } from "@/components/ui/button";
 import { LoadingSnake } from "@/components/ui/loading-snake";
-import { toast } from "@/hooks/use-toast";
 import { Map as MapIcon, List, Globe, MapPin, Container, ShieldCheck, GraduationCap, Boxes, PawPrint, Thermometer, Lightbulb, Stethoscope, Phone } from "lucide-react";
 
-type NetworkSentinel = {
-  user_id: string;
-  case_id: string;
-  full_name: string;
-  region: string;
-  experience_years: number;
-  species_focus: string | null;
-  capacity: string | null;
-  tier: string | null;
-  pledge_data: {
-    quarantine?: string;
-    vet_contact?: string;
-    questionnaire?: {
-      street: string;
-      house_number: string;
-      zip: string;
-      city: string;
-      phone: string;
-      feeding: string;
-      sachkunde: "none" | "bna" | "dght" | "other";
-      sachkunde_detail: string;
-      enclosure: { size: string; lighting: string; climate: string; setup: string };
-    };
-  } | null;
-};
+import { fetchSentinelPage, type NetworkSentinel } from "@/lib/sentinel-directory";
+import { parseEnclosures } from "@/lib/enclosures";
+import { Input } from "@/components/ui/input";
 
 const tierBadge: Record<string, string> = {
   S1: "border-border bg-muted text-muted-foreground",
@@ -95,6 +72,7 @@ const Detail = ({ icon, label, value }: { icon: React.ReactNode; label: string; 
 const SentinelCard = ({ s }: { s: NetworkSentinel }) => {
   const q = s.pledge_data?.questionnaire;
   const enc = q?.enclosure;
+  const slots = parseEnclosures(q?.enclosures);
   const terrarium = [enc?.setup, enc?.size].filter(Boolean).join(" · ");
   return (
     <article className="border border-border bg-surface p-5">
@@ -128,6 +106,8 @@ const SentinelCard = ({ s }: { s: NetworkSentinel }) => {
         {q?.street && (
           <p className="flex items-center gap-2"><MapPin className="h-3 w-3" /> {[q.street, q.house_number].filter(Boolean).join(" ")}, {q.zip} {q.city}</p>
         )}
+        {s.email && <p><a href={`mailto:${s.email}`} className="underline">{s.email}</a></p>}
+        {slots.length > 0 && <p>Anlagen: {slots.filter((e) => e.status === "frei").length} frei / {slots.length} gesamt</p>}
         {q?.phone && <p className="flex items-center gap-2"><Phone className="h-3 w-3" /> {q.phone}</p>}
       </div>
     </article>
@@ -135,240 +115,113 @@ const SentinelCard = ({ s }: { s: NetworkSentinel }) => {
 };
 
 const BehoerdeNetwork = () => {
-  const { user, region, isBehoerde, loading } = useAuth();
+  const { user, canBrowseSentinels: canBrowse, loading } = useAuth();
+  const userId = user?.id;
   const supabase = useExternalSupabase();
   const [sentinels, setSentinels] = useState<NetworkSentinel[]>([]);
   const [busy, setBusy] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<"list" | "map" | "de">("list");
-  const [counts, setCounts] = useState<Record<string, number> | null>(null);
-  const [pins, setPins] = useState<{ lat: number; lng: number; name: string; detail?: string }[]>([]);
-  const [unmatched, setUnmatched] = useState<string[]>([]);
-  const [countsError, setCountsError] = useState(false);
-  const [locating, setLocating] = useState(false);
-  const [points, setPoints] = useState<{ key: string; name: string; tier: string | null; capacity: string; lat: number; lng: number }[]>([]);
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
+  const [points, setPoints] = useState<{ key: string; name: string; tier: string; capacity: string; lat: number; lng: number }[]>([]);
   const [geocoding, setGeocoding] = useState(false);
+  const [regions, setRegions] = useState<{ region: string; total: number }[]>([]);
+  const [countsError, setCountsError] = useState(false);
+  const after = cursors[cursors.length - 1];
+  const pageSize = 100;
 
   useEffect(() => {
-    document.title = "Network · ExoGuard";
-  }, []);
+    const timer = setTimeout(() => { setQuery(search.trim()); setCursors([undefined]); }, 250);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
-    if (!isBehoerde || !region || !user) { setBusy(false); return; }
+    if (!userId || !canBrowse) { setBusy(false); return; }
+    const controller = new AbortController();
+    setBusy(true); setError(null); setPoints([]);
+    void fetchSentinelPage(supabase, { after, search: query, limit: pageSize, signal: controller.signal })
+      .then((rows) => { if (!controller.signal.aborted) setSentinels(rows); })
+      .catch((e) => { if (!controller.signal.aborted) { setSentinels([]); setError(e.message); } })
+      .finally(() => { if (!controller.signal.aborted) setBusy(false); });
+    return () => controller.abort();
+  }, [userId, canBrowse, supabase, after, query]);
+
+  useEffect(() => {
+    if (!userId || !canBrowse || view !== "de") return;
+    const controller = new AbortController();
+    void supabase.rpc("sentinel_region_counts").abortSignal(controller.signal).then(({ data, error }) => {
+      if (controller.signal.aborted) return;
+      setCountsError(Boolean(error)); setRegions(data ?? []);
+    });
+    return () => controller.abort();
+  }, [userId, canBrowse, view, supabase]);
+
+  // Geocode only the visible page, with bounded concurrency and city-level pins.
+  useEffect(() => {
+    if (view === "list" || busy) return;
     let cancelled = false;
-    void (async () => {
-      setBusy(true);
-      // Kein exakter .eq("region")-Match: RLS liefert bereits die Region,
-      // aber Regionen sind Freitext ("München, Bayern" vs. "Bayern") — daher
-      // clientseitig mit Containment filtern (wie die RLS-Policy).
-      const { data, error } = await supabase
-        .from("sentinel_applications")
-        .select("user_id, case_id, full_name, region, experience_years, species_focus, capacity, tier, pledge_data")
-        .eq("status", "approved")
-        .range(0, 199);
-      if (cancelled) return;
-      const target = region.trim().toLowerCase();
-      const rows = ((data ?? []) as NetworkSentinel[]).filter((s) => {
-        const r = (s.region ?? "").trim().toLowerCase();
-        return !!r && (r === target || r.includes(target) || target.includes(r));
-      });
-      setSentinels(rows);
-      setBusy(false);
-      // Fehlversorgung vermeiden: eine RLS-/Netzwerk-Fehlermeldung darf nicht
-      // wie "keine Sentinels in der Region" aussehen.
-      if (error) {
-        console.warn("network: sentinel load", error.message);
-        toast({ title: "Laden fehlgeschlagen", description: error.message, variant: "destructive" });
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isBehoerde, region, user, supabase]);
-
-  useEffect(() => {
-    if (view !== "de" || counts || !user) return;
-    let cancelled = false;
-    void (async () => {
-      const { data, error } = await supabase
-        .from("sentinel_applications")
-        .select("full_name, region, tier, pledge_data")
-        .eq("status", "approved")
-        .range(0, 999);
-      if (cancelled) return;
-      if (error || !data) { setCountsError(true); return; }
-      const rows = data as { full_name: string; region: string | null; tier: string | null; pledge_data: NetworkSentinel["pledge_data"] }[];
-      const map: Record<string, number> = {};
-      const raw = new Set<string>();
-      for (const row of rows) {
-        const r = (row.region ?? "").trim();
-        if (!r) continue;
-        const state = mapRegionToState(r);
-        if (state) map[state] = (map[state] ?? 0) + 1;
-        else raw.add(r);
-      }
-      setCounts(map);
-      setUnmatched([...raw].slice(0, 8));
-      // Pins auf City-Level (keine Hausadressen): eindeutige PLZ+Ort geokodieren,
-      // ohne Ort auf die Region zurückfallen (RLS zeigt nur die eigene Region).
-      setLocating(true);
-      const seen = new Map<string, [number, number]>();
-      const out: { lat: number; lng: number; name: string; detail?: string }[] = [];
-      for (const row of rows) {
-        const q = row.pledge_data?.questionnaire;
-        const key = [q?.zip, q?.city].filter(Boolean).join(" ").trim() || (row.region ?? "").trim();
-        if (!key) continue;
-        if (!seen.has(key)) seen.set(key, await geocode(`${key}, Deutschland`));
-        if (cancelled) return;
-        const pos = seen.get(key);
-        if (pos) out.push({ lat: pos[0], lng: pos[1], name: row.full_name, detail: `${row.tier ?? "—"} · ${q?.city ?? row.region ?? ""}` });
-      }
-      if (!cancelled) { setPins(out); setLocating(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [view, counts, user, supabase]);
-
-  useEffect(() => {
-    if (view !== "map" || points.length > 0 || sentinels.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      setGeocoding(true);
-      const results: { key: string; name: string; tier: string | null; capacity: string; lat: number; lng: number }[] = [];
-      for (const s of sentinels) {
+    setGeocoding(true); setPoints([]);
+    let index = 0;
+    const out: typeof points = [];
+    const worker = async () => {
+      while (!cancelled && index < sentinels.length) {
+        const s = sentinels[index++];
         const q = s.pledge_data?.questionnaire;
-        const key = [q?.zip, q?.city].filter(Boolean).join(" ").trim() || (s.region ?? "").trim();
-        if (!key) continue;
-        const pos = await geocode(s.region ? `${key}, ${s.region}` : key);
-        if (cancelled) return;
-        if (pos) results.push({ key: s.user_id, name: s.full_name, tier: s.tier, capacity: s.capacity ?? "", lat: pos[0], lng: pos[1] });
+        const key = [q?.zip, q?.city, s.region, "Deutschland"].filter(Boolean).join(", ");
+        const pos = await geocode(key);
+        if (pos && !cancelled) out.push({ key: s.user_id, name: s.full_name, tier: s.tier, capacity: s.capacity, lat: pos[0], lng: pos[1] });
       }
-      if (!cancelled) { setPoints(results); setGeocoding(false); }
-    })();
+    };
+    void Promise.all([worker(), worker(), worker()]).then(() => {
+      if (!cancelled) { setPoints(out); setGeocoding(false); }
+    });
     return () => { cancelled = true; };
-  }, [view, points.length, sentinels]);
+  }, [view, sentinels, busy]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background text-muted-foreground">
-        <SiteHeader />
-        <main className="container py-24 text-center"><LoadingSnake label="Lade Netzwerk" /></main>
-      </div>
-    );
-  }
+  const counts = useMemo(() => {
+    const result: Record<string, number> = {};
+    for (const row of regions) { const state = mapRegionToState(row.region); if (state) result[state] = (result[state] ?? 0) + Number(row.total); }
+    return result;
+  }, [regions]);
 
-  if (!isBehoerde) {
-    return (
-      <div className="min-h-screen bg-background text-foreground">
-        <SiteHeader />
-        <main className="container max-w-xl py-24 text-center">
-          <h1 className="font-editorial text-3xl">Kein Behörden-Zugang</h1>
-          <p className="mt-4 text-sm text-muted-foreground">Dieser Bereich ist Behörden mit Zuständigkeitsregion vorbehalten.</p>
-          <Button asChild className="mt-6"><Link to="/start">Zur Startseite</Link></Button>
-        </main>
-      </div>
-    );
-  }
-
-  if (!region) {
-    return (
-      <div className="min-h-screen bg-background text-foreground">
-        <SiteHeader />
-        <main className="container max-w-xl py-24 text-center">
-          <h1 className="font-editorial text-3xl">Zuständigkeitsregion fehlt</h1>
-          <p className="mt-4 text-sm text-muted-foreground">Ein Admin muss deinem Behördenkonto eine Region zuweisen.</p>
-          <Button asChild className="mt-6"><Link to="/account">Zum Konto</Link></Button>
-        </main>
-      </div>
-    );
-  }
+  if (loading) return <><SiteHeader /><main className="container py-24"><LoadingSnake label="Lade Netzwerk" /></main></>;
+  if (!canBrowse) return <><SiteHeader /><main className="container py-24"><h1 className="font-editorial text-3xl">Zugang für Einrichtungen und Behörden</h1><Button asChild className="mt-6"><Link to="/start">Zur Startseite</Link></Button></main></>;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
       <SiteHeader />
       <main className="container py-8">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <span className="eyebrow">§ Behörde · Sentinel-Netzwerk</span>
-            <h1 className="font-editorial mt-2 text-4xl md:text-5xl">Sentinels in {region}</h1>
-            <p className="mt-3 text-muted-foreground">{sentinels.length} verfügbare Sentinels für Ward-Zuweisung</p>
-          </div>
+        <span className="eyebrow">§ Triage · Sentinel-Netzwerk</span>
+        <h1 className="font-editorial mt-2 text-4xl md:text-5xl">Sentinels finden</h1>
+        <p className="mt-3 text-muted-foreground">Freigegebene Sentinels bundesweit · Erfahrung, Anlagen und Kontakt für die passende Unterbringung. Aufnahme bitte direkt abstimmen.</p>
+        <label className="mt-6 block max-w-xl text-sm">Name, Ort, Region, Tierart oder Stufe
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} maxLength={200} placeholder="z. B. Bayern, Python oder S4" className="mt-2" />
+        </label>
+        <div className="mt-6 flex max-w-xl gap-2">
+          {([["list", "Liste", List], ["map", "Karte", MapIcon], ["de", "Deutschland", Globe]] as const).map(([key,label,Icon]) =>
+            <Button key={key} variant={view === key ? "default" : "outline"} onClick={() => setView(key)} aria-pressed={view === key}><Icon className="mr-2 h-4 w-4" />{label}</Button>)}
         </div>
-
-        <div className="mt-6 max-w-xl flex gap-px bg-border">
-          {([["list", "Liste", List], ["map", "Karte", MapIcon], ["de", "Deutschland", Globe]] as const).map(([k, lbl, Icon]) => (
-            <button
-              key={k}
-              onClick={() => setView(k)}
-              aria-pressed={view === k}
-              className={`flex flex-1 items-center justify-center gap-2 bg-surface px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
-                view === k ? "bg-surface-elevated text-primary" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" /> {lbl}
-            </button>
-          ))}
-        </div>
-
-        {busy ? (
-          <div className="mt-10 flex justify-center"><LoadingSnake label="Lade Sentinels" compact /></div>
-        ) : view === "de" ? (
-          <div className="mt-8 max-w-3xl">
-            {counts ? (
-              <>
-                <Suspense fallback={<div className="flex h-64 items-center justify-center border border-border text-xs text-muted-foreground">Lade Karte …</div>}>
-                  <GermanyMap values={counts} valueLabel="Freigegebene Sentinels" pins={pins} />
-                </Suspense>
-                <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                  Freigegebene Sentinels je Bundesland · Pins auf Ortsebene · Zoomen möglich
-                  {locating && <span className="mt-1 block normal-case tracking-normal">Orte werden bestimmt …</span>}
-                  {unmatched.length > 0 && (
-                    <span className="mt-1 block normal-case tracking-normal">Nicht zugeordnet: {unmatched.join(", ")}</span>
-                  )}
-                </p>
-              </>
-            ) : countsError ? (
-              <div className="border border-border bg-surface p-8 text-sm text-muted-foreground">
-                Bundesländer-Übersicht nicht verfügbar — dein Zugang ist auf {region} beschränkt.
-              </div>
-            ) : (
-              <div className="flex h-40 items-center justify-center border border-border text-xs text-muted-foreground">
-                Zähle Sentinels …
-              </div>
-            )}
+        {error && <p role="alert" className="mt-6 text-destructive">Sentinels konnten nicht geladen werden: {error}</p>}
+        {busy ? <div className="mt-10"><LoadingSnake label="Lade Sentinels" /></div> : <>
+          {view === "de" && <div className="mt-6 max-w-3xl">
+            {countsError ? <p role="alert">Die bundesweite Übersicht konnte nicht geladen werden.</p> : <Suspense fallback={<LoadingSnake label="Lade Karte" />}><GermanyMap values={counts} valueLabel="Freigegebene Sentinels" pins={points.map((p) => ({ ...p, detail: p.tier }))} /></Suspense>}
+            <p className="mt-2 text-xs text-muted-foreground">Zahlen: gesamtes Netzwerk · Pins: aktuelle Ergebnisseite auf Ortsebene</p>
+          </div>}
+          {view === "map" && points.length > 0 && <div className="mt-6"><SentinelMap points={points} /></div>}
+          {geocoding && view !== "list" && <p className="mt-3 text-sm">Orte werden bestimmt …</p>}
+          {!error && sentinels.length === 0 && <p className="mt-8">Keine passenden freigegebenen Sentinels gefunden.</p>}
+          <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">{sentinels.map((s) => <SentinelCard key={s.user_id} s={s} />)}</div>
+          <div className="mt-6 flex items-center gap-4">
+            <Button variant="outline" disabled={cursors.length === 1} onClick={() => setCursors((c) => c.slice(0,-1))}>Zurück</Button>
+            <span>Seite {cursors.length} · {sentinels.length} Ergebnisse</span>
+            <Button variant="outline" disabled={sentinels.length < pageSize} onClick={() => setCursors((c) => [...c,sentinels[sentinels.length-1].user_id])}>Weiter</Button>
           </div>
-        ) : sentinels.length === 0 ? (
-          <div className="mt-10 border border-border bg-surface p-10 text-sm text-muted-foreground">
-            Keine freigeschalteten Sentinels in {region}. Sobald Anwendungen in dieser Region freigegeben sind, erscheinen sie hier.
-          </div>
-        ) : view === "map" ? (
-          <div className="mt-8">
-            {points.length > 0 ? (
-              <>
-                <SentinelMap points={points} />
-                <p className="mt-2 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                  <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-primary" aria-hidden /> Sentinel</span>
-                  <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-success" aria-hidden /> Stufe 4 · Experte</span>
-                </p>
-              </>
-            ) : geocoding ? (
-              <div className="flex h-40 items-center justify-center border border-border text-xs text-muted-foreground">
-                Bestimme Positionen …
-              </div>
-            ) : (
-              <div className="border border-border bg-surface p-8 text-sm text-muted-foreground">
-                Keine Adressen gefunden — sobald Sentinels eine Adresse hinterlegen, erscheinen sie auf der Karte.
-              </div>
-            )}
-            <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {sentinels.map((s) => <SentinelCard key={s.user_id} s={s} />)}
-            </div>
-          </div>
-        ) : (
-          <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {sentinels.map((s) => <SentinelCard key={s.user_id} s={s} />)}
-          </div>
-        )}
+        </>}
       </main>
       <SiteFooter />
     </div>
   );
 };
-
 export default BehoerdeNetwork;

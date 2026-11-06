@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
 import { useExternalSupabase } from "@/integrations/external/supabase";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useToast } from "@/hooks/use-toast";

@@ -11,7 +11,7 @@ import { toast } from "@/hooks/use-toast";
 import { ArrowLeft, ArrowRight, CheckCircle2, FileCheck2, MailCheck, Pencil, Plus, RefreshCw, ShieldCheck, Upload, X } from "lucide-react";
 import { useUser, useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { EXTERNAL_CONFIG } from "@/config/external";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { RegionSelect } from "@/components/RegionSelect";
 import { BUNDESLAENDER } from "@/lib/germanRegions";
 import { HABITAT_CATEGORIES, parseCapacity, totalCapacity } from "@/lib/habitats";
@@ -42,7 +42,7 @@ const schema = z.object({
   yearsKeeping: z.coerce.number().min(0, "Ungültig").max(80),
   species: z.string().trim().min(3, "Bitte mindestens eine Spezies/Gruppe nennen").max(500),
   capacity: z.string().trim().min(1, "Kapazität angeben").max(500),
-  quarantine: z.enum(["yes", "partial", "no"], { errorMap: () => ({ message: "Bitte auswählen" }) }),
+  quarantine: z.enum(["yes", "partial", "no"], { error: "Bitte auswählen" }),
   vetContact: z.string().trim().min(2, "Tierarztkontakt erforderlich").max(200),
   enclosureSize: z.string().trim().min(2, "Maße angeben").max(200),
   enclosureLighting: z.string().trim().min(2, "Beleuchtung angeben").max(200),
@@ -52,17 +52,17 @@ const schema = z.object({
   feeding: z.string().trim().min(3, "Fütterung beschreiben").max(500),
   overwintering: z.string().trim().max(300),
   infoSources: z.array(z.string()).min(1, "Bitte mindestens eine Quelle wählen"),
-  sachkunde: z.enum(["none", "bna", "dght", "other"], { errorMap: () => ({ message: "Bitte auswählen" }) }),
+  sachkunde: z.enum(["none", "bna", "dght", "other"], { error: "Bitte auswählen" }),
   sachkundeDetail: z.string().trim().max(200),
   motivation: z.string().trim().min(40, "Bitte mindestens 40 Zeichen.").max(2000),
-  p_noTrade: z.literal(true, { errorMap: () => ({ message: "Erforderlich" }) }),
-  p_temporary: z.literal(true, { errorMap: () => ({ message: "Erforderlich" }) }),
-  p_animalFirst: z.literal(true, { errorMap: () => ({ message: "Erforderlich" }) }),
-  p_transparency: z.literal(true, { errorMap: () => ({ message: "Erforderlich" }) }),
-  p_handover: z.literal(true, { errorMap: () => ({ message: "Erforderlich" }) }),
-  p_truthful: z.literal(true, { errorMap: () => ({ message: "Erforderlich" }) }),
+  p_noTrade: z.literal(true, { error: "Erforderlich" }),
+  p_temporary: z.literal(true, { error: "Erforderlich" }),
+  p_animalFirst: z.literal(true, { error: "Erforderlich" }),
+  p_transparency: z.literal(true, { error: "Erforderlich" }),
+  p_handover: z.literal(true, { error: "Erforderlich" }),
+  p_truthful: z.literal(true, { error: "Erforderlich" }),
   selfPledge: z.literal(true, {
-    errorMap: () => ({ message: "Ohne Selbstverpflichtung keine Einreichung." }),
+    error: "Ohne Selbstverpflichtung keine Einreichung.",
   }),
 });
 // ponytail: cross-field rule (sachkunde=other → detail required) lives outside

@@ -73,7 +73,7 @@ async function clerkPrimaryEmail(userId: string): Promise<string | null> {
   return primary?.email_address ?? u.email_addresses?.[0]?.email_address ?? null;
 }
 
-async function loadOwnApplication(userId: string, body: Payload): Promise<{ email: string; full_name: string; case_id: string } | null> {
+async function loadOwnApplication(userId: string, body: Payload): Promise<{ id: string; email: string; full_name: string; case_id: string } | null> {
   if (!SUPABASE_URL || !SERVICE_ROLE) return null;
   const filters = body.applicationId
     ? `id=eq.${encodeURIComponent(body.applicationId)}`
@@ -82,7 +82,7 @@ async function loadOwnApplication(userId: string, body: Payload): Promise<{ emai
       : "";
   if (!filters) return null;
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/sentinel_applications?${filters}&user_id=eq.${encodeURIComponent(userId)}&select=email,full_name,case_id&limit=1`,
+    `${SUPABASE_URL}/rest/v1/sentinel_applications?${filters}&user_id=eq.${encodeURIComponent(userId)}&confirmation_status=neq.staging&select=id,email,full_name,case_id&limit=1`,
     {
       headers: {
         Authorization: `Bearer ${SERVICE_ROLE}`,
@@ -91,7 +91,7 @@ async function loadOwnApplication(userId: string, body: Payload): Promise<{ emai
     },
   );
   if (!res.ok) return null;
-  const rows = (await res.json()) as { email: string; full_name: string; case_id: string }[];
+  const rows = (await res.json()) as { id: string; email: string; full_name: string; case_id: string }[];
   return rows[0] ?? null;
 }
 
@@ -233,6 +233,11 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      const marked = await fetch(`${SUPABASE_URL}/rest/v1/sentinel_applications?id=eq.${app.id}`, {
+        method: "PATCH", headers: { Authorization: `Bearer ${SERVICE_ROLE}`, apikey: SERVICE_ROLE, "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation_status: "sent" }),
+      });
+      if (!marked.ok) console.error("confirmation status update failed", marked.status);
     } else {
       // Dev fallback: no provider configured — log so the client flow is testable.
       // Avoid logging PII: only a redacted marker + case id.

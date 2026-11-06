@@ -1,7 +1,8 @@
+import { fetchSentinels } from "@/lib/sentinel-directory";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useExternalSupabase } from "@/integrations/external/supabase";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Button } from "@/components/ui/button";
@@ -95,27 +96,9 @@ const Behoerde = () => {
   const [wardTransports, setWardTransports] = useState<TransportLog[]>([]);
 
   const loadSentinels = useCallback(async () => {
-    if (!region) return;
-    // Freitext-Regionen: RLS scoped bereits, Containment-Filter clientseitig
-    // ("München, Bayern" soll für "Bayern" sichtbar sein).
-    const { data, error } = await supabase
-      .from("sentinel_applications")
-      .select("user_id, full_name, capacity, region, pledge_data")
-      .eq("status", "approved")
-      .range(0, 99);
-    const target = region.trim().toLowerCase();
-    const rows = ((data ?? []) as { user_id: string; full_name: string; capacity: string | null; region: string | null; pledge_data: { questionnaire?: unknown } | null }[])
-      .filter((s) => {
-        const r = (s.region ?? "").trim().toLowerCase();
-        return !!r && (r === target || r.includes(target) || target.includes(r));
-      });
-    setSentinels(rows);
-    // Silent failure here looked like "no sentinels" and broke assignment.
-    if (error) {
-      console.warn("dashboard: sentinel load", error.message);
-      toast({ title: "Laden fehlgeschlagen", description: error.message, variant: "destructive" });
-    }
-  }, [region, supabase, toast]);
+    try { setSentinels(await fetchSentinels(supabase)); }
+    catch (e) { toast({ title: "Laden fehlgeschlagen", description: (e as Error).message, variant: "destructive" }); }
+  }, [supabase, toast]);
 
   const assignSentinel = async (wardId: string) => {
     if (!assignTo) return;

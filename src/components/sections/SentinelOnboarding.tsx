@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { SentinelWizard } from "@/components/sections/SentinelWizard";
 import { useSentinelApplication } from "@/hooks/useSentinelApplication";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { CheckCircle2, Clock, XCircle } from "lucide-react";
 
 // Content-only: SentinelPath owns the hero + PathwayFlow + page shell.

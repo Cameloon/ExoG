@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 
 export type SentinelAppStatus = "pending" | "under_review" | "approved" | "rejected" | null;
 

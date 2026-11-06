@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/auth-context";
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { EXTERNAL_CONFIG } from "@/config/external";
