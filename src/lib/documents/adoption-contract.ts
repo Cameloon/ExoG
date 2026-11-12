@@ -16,7 +16,7 @@ import {
   embedImageAttachments,
   ATTACHMENT_KIND_LABEL,
   type Attachment,
-  SENDER,
+  documentSender,
   CONFIDENTIALITY_NOTICE,
   LEGAL_BASIS,
   type DocMeta,
@@ -27,6 +27,8 @@ export const ADOPTION_VERSION = "1.1.0";
 
 export type AdoptionContractInput = {
   caseRecord: CaseRecord;
+  draft?: boolean;
+  missingFields?: string[];
   sentinel: SentinelProfile;
   adopterName: string;
   adopterAddress: string;
@@ -56,8 +58,10 @@ type EligibilityResult = {
   missing: string[];
 };
 
+// Internal review rule: recorded custody, sensitive protection or high risk needs
+// documented clearance. This does not determine the legally required permit.
 export const requiresPermitForCase = (caseRecord: CaseRecord) =>
-  caseRecord.cites === "A" || ["kritisch", "hoch"].includes(caseRecord.risk);
+  caseRecord.legalCustody || caseRecord.cites === "A" || /(^|\/)I(\/|$)/.test(caseRecord.cites) || ["kritisch", "hoch"].includes(caseRecord.risk);
 
 export function evaluateEligibility(
   input: AdoptionContractInput,
@@ -76,15 +80,16 @@ export function evaluateEligibility(
   if (input.hasSachkunde && input.sachkundeRef.trim()) score++;
   else missing.push("Sachkundenachweis + Referenz");
 
-  // CITES A oder Risiko kritisch/hoch → Genehmigung Pflicht
+  // Completeness of this platform template, not an automatic legal assessment.
   const requiresPermit = requiresPermitForCase(caseRecord);
   if (!requiresPermit || (input.hasPermitIfRequired && input.permitRef.trim())) score++;
-  else missing.push("Behördliche Genehmigung (Pflicht für CITES-A / Hochrisiko)");
+  else missing.push("Dokumentierte behördliche Klärung / Freigabe");
 
   return { ok: missing.length === 0, score, max, missing };
 }
 
 export async function exportAdoptionContract(input: AdoptionContractInput) {
+  const SENDER = documentSender(input.sentinel);
   const { default: jsPDF } = await import("jspdf");
   const eligibility = evaluateEligibility(input, input.caseRecord);
   const meta: DocMeta = {
@@ -101,6 +106,7 @@ export async function exportAdoptionContract(input: AdoptionContractInput) {
     version: ADOPTION_VERSION,
     generatedAt: nowIso(),
     authoredBy: input.sentinel.name,
+    sender: SENDER, draft: input.draft, missingFields: input.missingFields,
   };
 
   const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -159,7 +165,7 @@ export async function exportAdoptionContract(input: AdoptionContractInput) {
     ["Erfahrung (Jahre)", input.experienceYears],
     ["Sachkundenachweis", input.hasSachkunde ? `Ja · ${input.sachkundeRef}` : "Nein"],
     [
-      "Behördl. Genehmigung",
+      "Behördliche Klärung / Freigabe",
       input.hasPermitIfRequired ? `Ja · ${input.permitRef}` : "Nicht vorgelegt",
     ],
     ["Tierärztliche Referenz", input.vetReference || "—"],
@@ -215,6 +221,7 @@ export async function exportAdoptionContract(input: AdoptionContractInput) {
     {
       schema: "exoguard.adoption-contract/1.0",
       docKitVersion: DOC_KIT_VERSION,
+      completion: { draft: Boolean(input.draft), missingFields: input.missingFields ?? [] },
       documentVersion: meta.version,
       documentId: meta.docId,
       generatedAt: meta.generatedAt,

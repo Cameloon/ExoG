@@ -10,8 +10,9 @@ where to_regclass('public.profiles') is not null
   and to_regclass('public.application_documents') is not null
   and to_regclass('public.ward_listings') is not null
   and to_regclass('public.ward_interest') is not null
-  and to_regclass('public.shelters') is not null
-  and to_regclass('public.sentinel_shelter_requests') is not null
+   and to_regclass('public.shelters') is not null
+   and to_regclass('public.sentinel_shelter_requests') is not null
+   and to_regclass('public.authority_ward_assignment_requests') is not null
   and to_regclass('public.pending_shelter_requests') is not null
   and to_regclass('public.care_logs') is not null
   and to_regclass('public.identification_requests') is not null
@@ -29,7 +30,7 @@ from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public'
   and c.relname in ('profiles','user_roles','sentinel_applications','application_documents',
-                    'ward_listings','ward_interest','shelters','sentinel_shelter_requests',
+                     'ward_listings','ward_interest','shelters','sentinel_shelter_requests','authority_ward_assignment_requests',
                     'pending_shelter_requests','care_logs','identification_requests',
                     'identification_votes','transport_logs','change_log','role_change_log',
                     'sentinel_change_requests','shelter_contacts')
@@ -45,8 +46,8 @@ from pg_proc p
 join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
   and p.proname in ('has_role','is_approved_sentinel','is_expert','is_gov','is_gov_for_region',
-                    'current_region','current_clerk_user_id','append_care_log',
-                    'log_change','rls_auto_enable')
+                     'current_region','current_clerk_user_id','append_care_log',
+                     'log_change','rls_auto_enable','respond_authority_ward_assignment_request')
   and exists (
     select 1
     from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
@@ -62,12 +63,14 @@ where id not in ('kyc-documents','ward-images','lab-docs','id-photos');
 
 -- (expect 0 rows)
 
--- 5) Uniqueness: one shelter request per user, one active application per user
+-- 5) Uniqueness: one shelter request per user, one active application per user,
+--    and one open authority request per ward/sentinel pair
 select 'ok' as result
 where not exists (
   select 1 from pg_indexes
   where schemaname = 'public'
-    and indexname in ('idx_pending_shelter_one_per_user','idx_apps_one_active_per_user')
+     and indexname in ('idx_pending_shelter_one_per_user','idx_apps_one_active_per_user',
+                       'authority_ward_assignment_requests_one_open_pair')
 );
 
 -- (expect 0 rows)
@@ -113,3 +116,29 @@ select 'ok' as result where not exists (
   select 1 from pg_policies where schemaname='public' and tablename='sentinel_applications'
     and policyname in ('Apps: shelter select applicants','Apps: behoerde select region','Apps: own insert')
 );
+
+
+-- Post-login workflow release (00039).
+select case when
+  to_regprocedure('public.review_sentinel_application(uuid,public.application_status,text,text)') is not null
+  and to_regprocedure('public.match_ward_interest(uuid)') is not null
+  and not has_function_privilege('anon','public.match_ward_interest(uuid)','execute')
+then 'ok' else 'FAIL: workflow commands missing or publicly executable' end as workflow_commands;
+
+-- 8) Sentinel-side request dismissal column from 00033
+select 'ok' as result
+where exists (
+  select 1 from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'sentinel_shelter_requests'
+    and column_name = 'sentinel_hidden'
+);
+
+-- (0 rows = apply 00033_shelter_request_dismissal.sql)
+
+-- Structured intake for document suggestions (00040).
+select case when exists (
+  select 1 from information_schema.columns where table_schema='public'
+  and table_name='ward_listings' and column_name='intake_type' and is_nullable='NO'
+) and exists (select 1 from pg_constraint where conname='ward_intake_type_valid')
+then 'ok' else 'FAIL: intake migration 00040 missing' end as intake_workflow;

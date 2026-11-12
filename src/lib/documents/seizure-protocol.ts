@@ -12,7 +12,7 @@ import {
   safeFileBase,
   sectionHeader,
   signatureLines,
-  SENDER,
+  documentSender,
   CONFIDENTIALITY_NOTICE,
   LEGAL_BASIS,
   type DocMeta,
@@ -23,6 +23,8 @@ export const SEIZURE_VERSION = "1.0.0";
 
 export type SeizureInput = {
   caseRecord: CaseRecord;
+  draft?: boolean;
+  missingFields?: string[];
   sentinel: SentinelProfile;
   /** Ort der Sicherstellung */
   location: string;
@@ -47,10 +49,11 @@ export type SeizureInput = {
 };
 
 export async function exportSeizureProtocol(input: SeizureInput) {
+  const SENDER = documentSender(input.sentinel);
   const { default: jsPDF } = await import("jspdf");
   const meta: DocMeta = {
     title: "Sicherstellungs- / Beschlagnahmungsprotokoll",
-    subtitle: `Protokoll gemäß ${input.legalBasis || "§ 16a TierSchG"} – Tier-Sicherstellung`,
+    subtitle: input.legalBasis ? `Protokoll gemäß ${input.legalBasis} – Tier-Sicherstellung` : "Tier-Sicherstellung · Rechtsgrundlage noch zu ergänzen",
     fileNumber: input.caseRecord.id,
     docId: makeDocId([
       "seizure",
@@ -62,6 +65,7 @@ export async function exportSeizureProtocol(input: SeizureInput) {
     version: SEIZURE_VERSION,
     generatedAt: nowIso(),
     authoredBy: input.sentinel.name,
+    sender: SENDER, draft: input.draft, missingFields: input.missingFields,
   };
 
   const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -138,6 +142,7 @@ export async function exportSeizureProtocol(input: SeizureInput) {
     {
       schema: "exoguard.seizure-protocol/1.0",
       docKitVersion: DOC_KIT_VERSION,
+      completion: { draft: Boolean(input.draft), missingFields: input.missingFields ?? [] },
       documentVersion: meta.version,
       documentId: meta.docId,
       generatedAt: meta.generatedAt,

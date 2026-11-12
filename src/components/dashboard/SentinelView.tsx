@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+import { AppFeedback } from "@/components/AppFeedback";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +18,8 @@ import {
   Fingerprint,
   AlertCircle,
   Download,
+  ImagePlus,
+  X,
 } from "lucide-react";
 import { CASES, CARE_LOGS, ME_SENTINEL, DUTIES, ACTIVITY_7D, type CareLog, type Duty, type DutyPriority, type EnclosureSlot, type SentinelProfile } from "@/lib/dashboard-data";
 import { RATIONALE_RULES, validateRationale, sign } from "@/lib/care-log-validation";
@@ -32,7 +36,9 @@ import {
   wardToCase,
   type WardRow,
 } from "@/lib/care-logs";
-import { capacityFromEnclosures, saveEnclosures } from "@/lib/enclosures";
+import { assignWardToEnclosure, capacityFromEnclosures, reflectWardAssignments, saveEnclosures } from "@/lib/enclosures";
+import { fetchMyWardAssignmentRequests, respondToWardAssignmentRequest, type IncomingWardAssignmentRequest } from "@/lib/ward-assignment-requests";
+import { sniffImage, uploadId } from "@/lib/uploads";
 import { addDuty as persistDuty, fetchActivity7d, fetchDuties, formatDue, setDutyDone } from "@/lib/duties";
 import { DocumentsHub } from "./DocumentsHub";
 import { SentinelOverview } from "./SentinelOverview";
@@ -40,7 +46,7 @@ import { IdentificationQueue } from "./IdentificationQueue";
 import { LoadingSnake } from "@/components/ui/loading-snake";
 
 type SectionTab = "log" | "docs";
-type TopTab = "overview" | "care";
+type TopTab = "overview" | "care" | "identification";
 
 const BEHAVIORS: NonNullable<CareLog["metrics"]>["behavior"][] = [
   "ruhig",
@@ -53,7 +59,7 @@ const BEHAVIORS: NonNullable<CareLog["metrics"]>["behavior"][] = [
 
 
 export const SentinelView = ({ live = false }: { live?: boolean }) => {
-  const { user, isExpert } = useAuth();
+  const { user, isExpert, role } = useAuth();
   const supabase = useExternalSupabase();
 
   // ── Live data (only fetched when live=true; demo uses hardcoded data) ──
@@ -63,10 +69,16 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
   const [logRevision, setLogRevision] = useState(0);
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [liveLogs, setLiveLogs] = useState<Record<string, CareLog[]>>({});
+  const [wardAssignmentRequests, setWardAssignmentRequests] = useState<IncomingWardAssignmentRequest[]>([]);
+  const [respondingToAssignment, setRespondingToAssignment] = useState<string | null>(null);
   const [liveSentinel, setLiveSentinel] = useState<SentinelProfile>(ME_SENTINEL);
   const [logCount7d, setLogCount7d] = useState(0);
   const [booting, setBooting] = useState(live);
+  const [bootError, setBootError] = useState(false);
+  const [bootRevision, setBootRevision] = useState(0);
 
   const myCases = live
     ? wards.map(wardToCase)
@@ -77,6 +89,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
   const [logs, setLogs] = useState<Record<string, CareLog[]>>(CARE_LOGS);
   const [section, setSection] = useState<SectionTab>("log");
   const [topTab, setTopTab] = useState<TopTab>("overview");
+  const [documentDirty, setDocumentDirty] = useState(false);
 
   // Duties + activity: demo uses local state on the constants, live persists
   // to the duties table and derives activity from care_logs.
@@ -95,7 +108,8 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
       setDemoDuties((prev) => prev.map((d) => (d.id === id ? { ...d, done } : d)));
       return;
     }
-    dutyPrevRef.current[id] ??= !done;
+    if (id in dutyPrevRef.current) return;
+    dutyPrevRef.current[id] = !done;
     setLiveDuties((prev) => prev.map((d) => (d.id === id ? { ...d, done } : d)));
     setDutyDone(supabase, id, done)
       .then(() => delete dutyPrevRef.current[id])
@@ -108,50 +122,84 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
       });
   };
 
-  const handleSaveEnclosures = (next: EnclosureSlot[]) => {
-    if (!live || !user) return;
-    const before = liveSentinel.enclosures;
-    setLiveSentinel((s) => ({ ...s, enclosures: next }));
-    void saveEnclosures(supabase, user.id, next).catch((e) => {
-      setLiveSentinel((s) => ({ ...s, enclosures: before }));
+  const handleSaveEnclosures = async (next: EnclosureSlot[]): Promise<boolean> => {
+    if (!live || !user) return false;
+    const assignedCases = new Set(liveSentinel.enclosures.map((enclosure) => enclosure.occupiedBy).filter(Boolean));
+    if (wards.some((ward) => assignedCases.has(ward.case_code) && !next.some((enclosure) => enclosure.occupiedBy === ward.case_code))) {
+      toast({ title: "Anlage noch belegt", description: "Ordne das Tier zuerst einer anderen Anlage zu.", variant: "destructive" });
+      return false;
+    }
+    try {
+      await saveEnclosures(supabase, user.id, next);
+      setLiveSentinel((s) => ({ ...s, enclosures: reflectWardAssignments(next, wards) }));
+      return true;
+    } catch (e) {
       toast({ title: "Anlagen nicht gespeichert", description: (e as Error).message, variant: "destructive" });
-    });
+      return false;
+    }
   };
 
-  const handleAddDuty = (input: { title: string; caseId?: string; dueIso: string; priority: DutyPriority; category: Duty["category"] }) => {
-    if (!live) {
-      const iso = input.dueIso;
-      setDemoDuties((prev) => [
-        {
-          id: `D-${Date.now()}`,
-          title: input.title,
-          caseId: input.caseId,
-          due: formatDue(iso),
-          dueIso: iso,
-          priority: input.priority,
-          done: false,
-          category: input.category,
-        },
-        ...prev,
-      ]);
-      return;
+  const handleAssignWard = async (wardId: string, enclosureId: string): Promise<boolean> => {
+    if (!live || !user) return false;
+    const ward = wards.find((item) => item.id === wardId);
+    const enclosure = liveSentinel.enclosures.find((item) => item.id === enclosureId);
+    if (!ward || !enclosure) return false;
+    if (["reinigung", "wartung"].includes(enclosure.status)) {
+      toast({ title: "Anlage nicht verfügbar", description: "Wähle eine freie, gereinigte Anlage.", variant: "destructive" });
+      return false;
     }
-    if (!user) return;
-    void (async () => {
-      try {
-        const d = await persistDuty(supabase, {
-          ownerId: user.id,
-          title: input.title,
-          caseCode: input.caseId ?? null,
-          category: input.category,
-          priority: input.priority,
-          dueIso: input.dueIso || null,
-        });
-        setLiveDuties((prev) => [d, ...prev]);
-      } catch (e) {
-        toast({ title: "Pflicht nicht gespeichert", description: (e as Error).message, variant: "destructive" });
+    if (enclosure.occupiedBy && enclosure.occupiedBy !== ward.case_code) {
+      toast({ title: "Anlage bereits belegt", description: "Jede Anlage kann nur einem Tier zugeordnet werden.", variant: "destructive" });
+      return false;
+    }
+    const nextEnclosures = assignWardToEnclosure(liveSentinel.enclosures, ward.case_code, enclosureId);
+    try {
+      await saveEnclosures(supabase, user.id, nextEnclosures);
+      setLiveSentinel((s) => ({ ...s, enclosures: reflectWardAssignments(nextEnclosures, wards) }));
+      return true;
+    } catch (e) {
+      toast({ title: "Tierzuordnung nicht gespeichert", description: (e as Error).message, variant: "destructive" });
+      return false;
+    }
+  };
+
+  const handleAddDuty = async (input: { title: string; caseId?: string; dueIso: string; priority: DutyPriority; category: Duty["category"] }): Promise<boolean> => {
+    if (!live) {
+      setDemoDuties((prev) => [{ id: `D-${Date.now()}`, ...input, due: formatDue(input.dueIso), done: false }, ...prev]);
+      return true;
+    }
+    if (!user) return false;
+    try {
+      const d = await persistDuty(supabase, { ownerId: user.id, title: input.title, caseCode: input.caseId ?? null,
+        category: input.category, priority: input.priority, dueIso: input.dueIso || null });
+      setLiveDuties((prev) => [d, ...prev]);
+      return true;
+    } catch (e) {
+      toast({ title: "Pflicht nicht gespeichert", description: (e as Error).message, variant: "destructive" });
+      return false;
+    }
+  };
+
+  const respondToAssignment = async (request: IncomingWardAssignmentRequest, accept: boolean) => {
+    if (!user || respondingToAssignment) return;
+    setRespondingToAssignment(request.id);
+    try {
+      const result = await respondToWardAssignmentRequest(supabase, request.id, accept);
+      setWardAssignmentRequests((prev) => prev.filter((item) => item.id !== request.id));
+      if (result === "accepted") {
+        toast({ title: "Tieranfrage angenommen", description: `${request.ward.common_name} wurde deiner Pflege zugewiesen.` });
+        setBootRevision((revision) => revision + 1);
+      } else if (result === "declined") {
+        toast({ title: "Tieranfrage abgelehnt" });
+      } else {
+        toast({ title: "Anfrage nicht mehr verfügbar", description: "Das Tier wurde inzwischen anderweitig zugewiesen." });
       }
-    })();
+    } catch (e) {
+      void fetchMyWardAssignmentRequests(supabase, user.id).then(setWardAssignmentRequests).catch(() => {});
+      toast({ title: "Antwort nicht gespeichert", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setRespondingToAssignment(null);
+    }
   };
 
   // Bootstrap: pick first case, load live data.
@@ -162,37 +210,48 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
 
   useEffect(() => {
     if (!live || !user) return;
+    let active = true;
+    setBooting(true); setBootError(false);
     void (async () => {
       try {
-        const w = await fetchMyWards(supabase, user.id);
-        setWards(w);
-        setLiveSentinel(
-          await fetchLiveSentinelProfile(
+        const w = [];
+        for (let page = 0; active; page++) {
+          const batch = await fetchMyWards(supabase, user.id, page, 100);
+          w.push(...batch);
+          if (batch.length < 100) break;
+        }
+        const profile = await fetchLiveSentinelProfile(
             supabase,
             user.id,
             user.displayName ?? "Sentinel",
             user.email ?? "",
             w.length,
-          ),
-        );
-        const [d, act] = await Promise.all([
+          );
+        const [d, act, requests] = await Promise.all([
           fetchDuties(supabase, user.id),
           fetchActivity7d(supabase, user.id),
+          fetchMyWardAssignmentRequests(supabase, user.id),
         ]);
+        if (!active) return;
+        setWards(w); setLiveSentinel({ ...profile, enclosures: reflectWardAssignments(profile.enclosures, w) });
+        setWardAssignmentRequests(requests);
         setLiveDuties(d);
         setLiveActivity(act);
         // 7d count = sum of the activity buckets — one roundtrip saved.
         setLogCount7d(act.reduce((s, a) => s + a.logs, 0));
       } catch (e) {
-        toast({ title: "Laden fehlgeschlagen", description: (e as Error).message, variant: "destructive" });
+        if (active) setBootError(true);
       } finally {
-        setBooting(false);
+        if (active) setBooting(false);
       }
     })();
-  }, [live, user, supabase]);
+    return () => { active = false; };
+  }, [live, user, supabase, bootRevision]);
 
   const jumpToCase = (id: string) => {
     if (myCases.some((c) => c.id === id)) {
+      if ((note.trim() || rationale.trim() || documentDirty) && !window.confirm("Nicht gespeicherte Pflege- oder Dokumentangaben verwerfen?")) return;
+      setDocumentDirty(false); reset();
       setActiveId(id);
       setTopTab("care");
       setSection("log");
@@ -301,6 +360,72 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
     reset();
   };
 
+  // Sign ward photo paths for the care view. The bucket is private; owners
+  // may read their own folder (storage RLS).
+  useEffect(() => {
+    if (!live || !activeWard) return;
+    const paths = Array.from(new Set(activeWard.images ?? []));
+    const missing = paths.filter((p) => !photoUrls[p]);
+    if (missing.length === 0) return;
+    void (async () => {
+      const { data, error } = await supabase.storage
+        .from("ward-images")
+        .createSignedUrls(missing, 60 * 60);
+      if (error || !data) return;
+      const next: Record<string, string> = {};
+      data.forEach((d, i) => { if (d.signedUrl) next[missing[i]] = d.signedUrl; });
+      if (Object.keys(next).length) setPhotoUrls((prev) => ({ ...prev, ...next }));
+    })();
+  }, [live, activeWard, photoUrls, supabase]);
+
+  const addWardPhotos = async (ward: WardRow, files: File[]) => {
+    if (!live || !user || files.length === 0 || photoBusy) return;
+    setPhotoBusy(true);
+    const uploaded: string[] = [];
+    try {
+      for (const file of files) {
+        const img = await sniffImage(file);
+        if (!img) throw new Error(`${file.name}: nur JPG/PNG/WebP/GIF/AVIF bis 10 MB.`);
+        const path = `${user.id}/${uploadId()}.${img.ext}`;
+        const { error } = await supabase.storage
+          .from("ward-images")
+          .upload(path, file, { contentType: img.mime, upsert: false });
+        if (error) throw error;
+        uploaded.push(path);
+      }
+      const next = [...(ward.images ?? []), ...uploaded];
+      const { error } = await supabase.from("ward_listings").update({ images: next }).eq("id", ward.id).select("id").single();
+      if (error) throw error;
+      setWards((prev) => prev.map((w) => (w.id === ward.id ? { ...w, images: next } : w)));
+      toast({ title: "Fotos gespeichert", description: "Nur für vetted Stewards sichtbar." });
+    } catch (e) {
+      if (uploaded.length > 0) {
+        await supabase.storage.from("ward-images").remove(uploaded).catch(() => {});
+      }
+      toast({
+        title: "Foto-Upload fehlgeschlagen",
+        description: e instanceof Error ? e.message : "Unbekannter Fehler",
+        variant: "destructive",
+      });
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const removeWardPhoto = async (ward: WardRow, path: string) => {
+    if (photoBusy || !window.confirm("Dieses Tierfoto entfernen?")) return;
+    const next = (ward.images ?? []).filter((p) => p !== path);
+    setPhotoBusy(true);
+    const { error } = await supabase.from("ward_listings").update({ images: next }).eq("id", ward.id).select("id").single();
+    setPhotoBusy(false);
+    if (error) {
+      toast({ title: "Foto nicht entfernt", description: error.message, variant: "destructive" });
+      return;
+    }
+    setWards((prev) => prev.map((w) => (w.id === ward.id ? { ...w, images: next } : w)));
+    await supabase.storage.from("ward-images").remove([path]).catch(() => {});
+  };
+
   const [exporting, setExporting] = useState(false);
   const exportAbort = useRef<AbortController | null>(null);
   useEffect(() => () => exportAbort.current?.abort(), []);
@@ -344,7 +469,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
 
   // Enclosure slots are the real capacity once maintained.
   const cap = capacityFromEnclosures(sentinel.enclosures) ?? sentinel.capacity;
-  const capPct = cap.total > 0 ? (cap.used / cap.total) * 100 : 0;
+  const capPct = cap.total > 0 ? Math.min(100, (cap.used / cap.total) * 100) : 0;
 
   // ponytail: block render until live data arrives to avoid demo-flash
   if (live && booting) {
@@ -354,6 +479,8 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
       </div>
     );
   }
+
+  if (live && bootError) return <AppFeedback title="Pflegebereich nicht verfügbar" message="Die Daten konnten nicht geladen werden. Bitte versuche es erneut." onRetry={() => setBootRevision((v) => v + 1)} />;
 
   return (
     <>
@@ -370,7 +497,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
           </div>
           <div className="mt-6 font-display text-2xl tracking-tight">{sentinel.name}</div>
           <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-            Sentinel · Region {sentinel.region}
+            {live && role !== "sentinel" ? "Pflegebereich" : "Sentinel"} · Region {sentinel.region}
           </div>
         </div>
         <div className="bg-background p-6">
@@ -414,17 +541,47 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
         </div>
       </div>
 
+      {live && wardAssignmentRequests.length > 0 && (
+        <section className="mt-6 border border-primary/30 bg-surface p-6" aria-labelledby="authority-ward-requests-title">
+          <span className="eyebrow">Neue Anfragen</span>
+          <h2 id="authority-ward-requests-title" className="mt-2 font-display text-xl">Tieranfragen von Behörden</h2>
+          <ul className="mt-4 divide-y divide-border border-y border-border">
+            {wardAssignmentRequests.map((request) => (
+              <li key={request.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-sm font-medium">{request.ward.common_name} · {request.ward.case_code}</div>
+                  <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+                    Behörde · {request.ward.region ?? "Region unbekannt"} · {request.ward.urgency}
+                  </div>
+                  {request.message && <p className="mt-2 text-xs text-muted-foreground">{request.message}</p>}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button size="sm" disabled={respondingToAssignment !== null} onClick={() => void respondToAssignment(request, true)}>
+                    {respondingToAssignment === request.id ? "Speichere …" : "Annehmen"}
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={respondingToAssignment !== null} onClick={() => void respondToAssignment(request, false)}>
+                    Ablehnen
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {/* Top-Tabs */}
-      <div className="mt-8 flex gap-px bg-border w-fit">
+      <div className="mt-8 flex flex-wrap gap-px bg-border w-fit">
         {(
           [
             { k: "overview", label: "Übersicht" },
             { k: "care", label: "Pflege & Dokumente" },
+            ...(live && isExpert ? [{ k: "identification" as const, label: "Bestimmungshilfe" }] : []),
           ] as const
         ).map((t) => (
           <button
             key={t.k}
-            onClick={() => setTopTab(t.k)}
+            aria-pressed={topTab === t.k}
+            onClick={() => { if (t.k !== topTab && documentDirty && !window.confirm("Nicht heruntergeladene Dokumentangaben verwerfen?")) return; if (t.k !== topTab) setDocumentDirty(false); setTopTab(t.k); }}
             className={`bg-surface px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
               topTab === t.k ? "text-primary" : "text-muted-foreground hover:text-foreground"
             }`}
@@ -439,24 +596,23 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
           <SentinelOverview
             sentinel={sentinel}
             cases={myCases}
+            wardAssignments={live ? wards.map((ward) => ({ wardId: ward.id, caseId: ward.case_code, name: ward.common_name, enclosureId: liveSentinel.enclosures.find((enclosure) => enclosure.occupiedBy === ward.case_code)?.id ?? null })) : undefined}
             activity={activity}
             duties={duties}
             onToggleDuty={handleToggleDuty}
             onAddDuty={handleAddDuty}
             onJumpToCase={jumpToCase}
             onSaveEnclosures={live ? handleSaveEnclosures : undefined}
+            onAssignWard={live ? handleAssignWard : undefined}
             live={live}
           />
         </div>
       )}
 
+      {topTab === "identification" && live && isExpert && <div className="mt-6"><IdentificationQueue /></div>}
+
       {topTab === "care" && (
       <div className="mt-6">
-        {live && isExpert && (
-          <div className="mb-8">
-            <IdentificationQueue />
-          </div>
-        )}
       <div className="grid gap-8 lg:grid-cols-12">
         {/* My animals */}
         <section className="lg:col-span-5">
@@ -469,13 +625,15 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
             )}
             {live && !booting && myCases.length === 0 && (
               <div className="bg-surface p-4 font-mono text-xs text-muted-foreground">
-                Noch keine Wards zugewiesen — Einrichtungen oder Behörden weisen dir Wards zu.
+                Noch keine Tiere in deiner Pflege.
+                <Button asChild variant="outline" className="mt-4"><Link to="/wards">Tiere ansehen</Link></Button>
               </div>
             )}
             {myCases.map((c) => (
               <button
                 key={c.id}
-                onClick={() => setActiveId(c.id)}
+                aria-pressed={activeId === c.id}
+                onClick={() => { if (activeId === c.id) return; if ((note.trim() || rationale.trim() || documentDirty) && !window.confirm("Nicht gespeicherte Pflege- oder Dokumentangaben verwerfen und Tier wechseln?")) return; setDocumentDirty(false); reset(); setActiveId(c.id); }}
                 className={`flex w-full items-center justify-between bg-surface p-4 text-left transition-colors hover:bg-surface-elevated ${
                   activeId === c.id ? "bg-surface-elevated" : ""
                 }`}
@@ -521,13 +679,64 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
                     size="sm"
                     variant="outline"
                     onClick={handleExport}
-                    disabled={exporting || activeLogs.length === 0}
+                    disabled={exporting || (!live && activeLogs.length === 0)}
                   >
                     <Download className="mr-2 h-3.5 w-3.5" />
                     {exporting ? "Erstelle…" : "Behörden-Export (PDF + JSON)"}
                   </Button>
                 </div>
               </div>
+
+              {live && activeWard && (
+                <div className="border-b border-border p-6">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="eyebrow flex items-center gap-2">
+                      <ImagePlus className="h-3 w-3" /> Fotos
+                    </span>
+                    <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                      {photoBusy ? "Speichere …" : `${activeWard.images?.length ?? 0} Bilder`}
+                    </span>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {(activeWard.images ?? []).map((path) => (
+                      <div key={path} className="relative h-20 w-24 overflow-hidden border border-border bg-muted">
+                        {photoUrls[path]
+                          ? <img src={photoUrls[path]} alt="Ward-Foto" loading="lazy" className="h-full w-full object-cover" />
+                          : <div className="h-full w-full animate-pulse bg-muted" />}
+                        <button
+                          type="button"
+                          disabled={photoBusy}
+                          onClick={() => void removeWardPhoto(activeWard, path)}
+                          aria-label="Foto entfernen"
+                          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center bg-background/90 text-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                    <label className={`flex h-20 w-24 cursor-pointer flex-col items-center justify-center gap-1 border border-dashed border-border bg-background text-muted-foreground transition-colors hover:border-primary hover:text-primary ${photoBusy ? "pointer-events-none opacity-50" : ""}`}>
+                      <ImagePlus className="h-4 w-4" />
+                      <span className="font-mono text-[9px] uppercase tracking-[0.15em]">Hinzufügen</span>
+                      <input
+                        type="file"
+                        aria-label="Tierfotos hinzufügen"
+                        disabled={photoBusy}
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                          const files = e.target.files ? Array.from(e.target.files) : [];
+                          e.target.value = "";
+                          void addWardPhotos(activeWard, files);
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+                    Nur für vetted Stewards sichtbar.
+                  </p>
+                </div>
+              )}
 
               {/* Sub-tabs: Pflege-Log / Dokumente */}
               <div className="flex gap-px bg-border">
@@ -539,7 +748,8 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
                 ).map((t) => (
                   <button
                     key={t.k}
-                    onClick={() => setSection(t.k)}
+                    aria-pressed={section === t.k}
+                    onClick={() => { if (t.k !== section && documentDirty && !window.confirm("Nicht heruntergeladene Dokumentangaben verwerfen?")) return; if (t.k !== section) setDocumentDirty(false); setSection(t.k); }}
                     className={`flex-1 bg-surface px-4 py-2.5 text-center font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
                       section === t.k
                         ? "text-primary"
@@ -796,7 +1006,7 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
 
               {section === "docs" && (
                 <div className="p-6">
-                  <DocumentsHub caseRecord={active} sentinel={sentinel} />
+                  <DocumentsHub key={active.id} caseRecord={active} sentinel={sentinel} onDirtyChange={setDocumentDirty} />
                 </div>
               )}
             </div>

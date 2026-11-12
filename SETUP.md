@@ -30,7 +30,6 @@ every step. Allow ~30 minutes the first time.
 1. In Supabase, open **SQL Editor → New query**.
 2. Paste and run each file from `external-supabase/migrations/` **in filename
    order** (`00001_init.sql` … up to the highest number present).
-
    > ⚠️ **Only on an empty project.** `00001_init.sql` starts with
    > `drop table … cascade` on `profiles`, `user_roles`,
    > `sentinel_applications`, `application_documents` and
@@ -111,7 +110,7 @@ insert into public.user_roles (user_id, role)
 values ('user_PASTE_YOUR_ID_HERE', 'admin');
 ```
 
-4. Sign out and back in. The **Admin** nav link now appears.
+1. Sign out and back in. The **Admin** nav link now appears.
 
 ## 7. (Optional) Auto-create profile rows on signup
 
@@ -129,7 +128,7 @@ informational), but if you want them auto-created:
    10-line `verifyWebhook` snippet for Deno). This function runs with the
    service role and its URL is public — without the signature check it is an
    open write endpoint into `profiles`.
-3. The skeleton lives in
+4. The skeleton lives in
    `external-supabase/functions/send-application-confirmation/index.ts`
    — copy and adapt.
 

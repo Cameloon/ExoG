@@ -1,3 +1,4 @@
+import { AppFeedback } from "@/components/AppFeedback";
 import { fetchSentinels } from "@/lib/sentinel-directory";
 import { useEffect, useState, useCallback } from "react";
 import { Link, Navigate } from "react-router-dom";
@@ -51,9 +52,9 @@ const INTEREST_STATUS: Record<string, { lbl: string; cls: string }> = {
 };
 
 const Shelters = () => {
-  const { user, isEinrichtung, isBehoerde, role, loading } = useAuth();
+  const { user, isEinrichtung, isBehoerde, canBrowseSentinels, role, loading } = useAuth();
   const isGov = isBehoerde;
-  const canManageProfile = isEinrichtung || isBehoerde;
+  const canManageProfile = isEinrichtung || isBehoerde || (role === "sentinel" && canBrowseSentinels);
   const supabase = useExternalSupabase();
   const { toast } = useToast();
   const [tab, setTab] = useState<Tab>("profil");
@@ -63,6 +64,8 @@ const Shelters = () => {
   const [applicants, setApplicants] = useState<Record<string, ApplicantApp>>({});
   const [expandedReq, setExpandedReq] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [decisionBusy, setDecisionBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<"pending" | "rejected" | null>(null);
   const [requesting, setRequesting] = useState(false);
@@ -105,7 +108,7 @@ const Shelters = () => {
 
   const load = useCallback(async () => {
     if (!user) return;
-    setBusy(true);
+    setBusy(true); setLoadError(false);
     try {
       const s = await fetchMyShelter(supabase, user.id);
       setShelter(s);
@@ -132,6 +135,7 @@ const Shelters = () => {
         }
       }
     } catch (e) {
+      setLoadError(true);
       toast({ title: "Laden fehlgeschlagen", description: (e as Error).message, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -143,19 +147,13 @@ const Shelters = () => {
   }, []);
 
   useEffect(() => {
-    if (isEinrichtung && user) void load();
-  }, [isEinrichtung, user, load]);
-
-  // Behörden verwalten ihr Standort-Profil (kind='gov') auf derselben Seite,
-  // damit Ämter auf der Netzwerk-Karte sichtbar sind.
-  useEffect(() => {
-    if (isBehoerde && user) void load();
-  }, [isBehoerde, user, load]);
+    if (canManageProfile && user) void load();
+  }, [canManageProfile, user, load]);
 
   // If the user signed up as a shelter but the admin hasn't confirmed yet,
   // surface the pending/rejected state instead of a generic "no access".
   useEffect(() => {
-    if (isEinrichtung || !user) {
+    if (canManageProfile || !user) {
       setPendingStatus(null);
       return;
     }
@@ -169,7 +167,7 @@ const Shelters = () => {
       .then(({ data }) =>
         setPendingStatus((data as { status: "pending" | "rejected" } | null)?.status ?? null),
       );
-  }, [isEinrichtung, user, supabase]);
+  }, [canManageProfile, user, supabase]);
 
   if (loading) {
     return (
@@ -199,7 +197,7 @@ const Shelters = () => {
               Deine Anmeldung als Einrichtung wurde übermittelt. Ein Admin
               prüft und bestätigt deinen Zugang — ohne KYC-Prozess.
             </p>
-            <Button asChild className="mt-6"><Link to="/start">Zur Startseite</Link></Button>
+            <Button asChild className="mt-6"><Link to="/dashboard">Zur Übersicht</Link></Button>
           </main>
         </div>
       );
@@ -211,9 +209,9 @@ const Shelters = () => {
           <main className="container max-w-xl py-24 text-center">
             <h1 className="font-editorial text-3xl">Einrichtungs-Antrag abgelehnt</h1>
             <p className="mt-4 text-sm text-muted-foreground">
-              Dein Antrag als Einrichtung wurde von einem Admin abgelehnt.
+              Dein Antrag als Einrichtung wurde von einem Admin abgelehnt. Du kannst die Angaben prüfen und den Zugang erneut beantragen.
             </p>
-            <Button asChild className="mt-6"><Link to="/start">Zur Startseite</Link></Button>
+            <Button className="mt-6" disabled={requesting} onClick={requestAccess}>Erneut beantragen</Button>
           </main>
         </div>
       );
@@ -285,13 +283,16 @@ const Shelters = () => {
   };
 
   const respondInterest = async (id: string, status: "matched" | "declined") => {
+    if (decisionBusy) return;
+    if (status === "matched" && !window.confirm("Tier verbindlich dieser Pflegestelle zuweisen und Anfrage bestätigen?")) return;
+    setDecisionBusy(true);
     try {
       await setInterestStatus(supabase, id, status);
       setInterests((r) => r.map((x) => (x.id === id ? { ...x, status } : x)));
-      toast({ title: status === "matched" ? "Interesse bestätigt" : "Interesse abgelehnt" });
+      toast({ title: status === "matched" ? "Tier zugewiesen und Anfrage bestätigt" : "Interesse abgelehnt" });
     } catch (e) {
       toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
-    }
+    } finally { setDecisionBusy(false); }
   };
 
   return (
@@ -312,6 +313,7 @@ const Shelters = () => {
             ] as const).map(([id, lbl, Icon]) => (
               <button
                 key={id}
+                aria-pressed={tab === id}
                 onClick={() => setTab(id)}
                 className={`flex items-center gap-2 bg-surface px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
                   tab === id ? "bg-surface-elevated text-primary" : "text-muted-foreground hover:text-foreground"
@@ -323,7 +325,7 @@ const Shelters = () => {
           </div>
         </div>
 
-        {busy && !shelter ? (
+        {loadError ? <AppFeedback title="Einrichtung nicht verfügbar" message="Das Profil konnte nicht geladen werden. Bitte versuche es erneut." onRetry={() => void load()} /> : busy && !shelter ? (
           <div className="mt-10 flex justify-center">
             <LoadingSnake label="Lade Einrichtungen" compact />
           </div>
@@ -371,7 +373,8 @@ const Shelters = () => {
                               <p className="mt-0.5 text-xs text-muted-foreground">
                                 {app ? (
                                   <button
-                                    onClick={() => setExpandedReq(expanded ? null : `ward-${x.id}`)}
+                                    aria-expanded={expanded}
+                                onClick={() => setExpandedReq(expanded ? null : `ward-${x.id}`)}
                                     className="inline-flex items-center gap-1 text-foreground hover:text-primary"
                                   >
                                     {app.full_name} · {app.region} · {app.experience_years} Jahre Erfahrung
@@ -391,8 +394,8 @@ const Shelters = () => {
                             </div>
                             {(x.status === "open" || x.status === "shortlisted") && (
                               <div className="flex gap-2">
-                                <Button size="sm" variant="outline" onClick={() => respondInterest(x.id, "matched")}><Check className="mr-1 h-3 w-3" /> Matchen</Button>
-                                <Button size="sm" variant="ghost" onClick={() => respondInterest(x.id, "declined")}><X className="mr-1 h-3 w-3" /> Ablehnen</Button>
+                                <Button size="sm" variant="outline" disabled={decisionBusy} onClick={() => respondInterest(x.id, "matched")}><Check className="mr-1 h-3 w-3" /> Zuweisen & bestätigen</Button>
+                                <Button size="sm" variant="ghost" disabled={decisionBusy} onClick={() => respondInterest(x.id, "declined")}><X className="mr-1 h-3 w-3" /> Ablehnen</Button>
                               </div>
                             )}
                           </div>
@@ -420,6 +423,7 @@ const Shelters = () => {
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="min-w-0">
                               <button
+                                aria-expanded={expanded}
                                 onClick={() => setExpandedReq(expanded ? null : r.id)}
                                 className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-primary"
                               >
@@ -444,7 +448,7 @@ const Shelters = () => {
                                   <Button size="sm" variant="ghost" onClick={() => respond(r.id, "declined")}><X className="mr-1 h-3 w-3" /> Ablehnen</Button>
                                 </>
                               )}
-                              <Button size="sm" variant="ghost" onClick={() => removeRequest(r.id)} title="Anfrage löschen">
+                              <Button size="sm" variant="ghost" onClick={() => removeRequest(r.id)} title="Anfrage löschen" aria-label="Anfrage löschen">
                                 <X className="h-3 w-3" />
                               </Button>
                             </div>

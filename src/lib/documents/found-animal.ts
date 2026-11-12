@@ -12,7 +12,7 @@ import {
   safeFileBase,
   sectionHeader,
   signatureLines,
-  SENDER,
+  documentSender,
   CONFIDENTIALITY_NOTICE,
   LEGAL_BASIS,
   type DocMeta,
@@ -23,6 +23,8 @@ export const FOUND_VERSION = "1.0.0";
 
 export type FoundAnimalInput = {
   caseRecord: CaseRecord;
+  draft?: boolean;
+  missingFields?: string[];
   sentinel: SentinelProfile;
   foundAt: string;
   foundLocation: string;
@@ -38,6 +40,7 @@ export type FoundAnimalInput = {
 };
 
 export async function exportFoundAnimalReport(input: FoundAnimalInput) {
+  const SENDER = documentSender(input.sentinel);
   const { default: jsPDF } = await import("jspdf");
   const meta: DocMeta = {
     title: "Fundtier-Meldung & Verwahrungsnachweis",
@@ -47,6 +50,7 @@ export async function exportFoundAnimalReport(input: FoundAnimalInput) {
     version: FOUND_VERSION,
     generatedAt: nowIso(),
     authoredBy: input.sentinel.name,
+    sender: SENDER, draft: input.draft, missingFields: input.missingFields,
   };
 
   const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -112,6 +116,7 @@ export async function exportFoundAnimalReport(input: FoundAnimalInput) {
     {
       schema: "exoguard.found-animal/1.0",
       docKitVersion: DOC_KIT_VERSION,
+      completion: { draft: Boolean(input.draft), missingFields: input.missingFields ?? [] },
       documentVersion: meta.version,
       documentId: meta.docId,
       generatedAt: meta.generatedAt,

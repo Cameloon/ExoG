@@ -35,7 +35,7 @@ Postgres patching, GoTrue and storage at once.
 
 - [ ] Create the project in **eu-central-1** or **eu-west-1** (your
       `docs/08_Cloud_C5_Hosting.md` claims EU processing).
-- [ ] Migrations: on a **fresh** project run `external-supabase/migrations/00001…00038.sql`
+- [ ] Migrations: on a **fresh** project run `external-supabase/migrations/00001…00041.sql`
       in filename order, then `smoke-test.sql` — every block must return `ok`.
 
 > ⚠️ **`SETUP.md` §3 said "each file is idempotent, so re-running one is safe". That was false**
@@ -44,6 +44,11 @@ Postgres patching, GoTrue and storage at once.
 > and `application_audit_log`. Re-running it on a project with data **deletes
 > every application, KYC row and audit entry.** On a project that already has
 > data, apply only the migrations that are actually missing, one at a time.
+
+- [ ] On projects already migrated through 00040, apply only
+      `external-supabase/migrations/00041_authority_ward_assignment_requests.sql`
+      before deploying the matching frontend. It adds the authority-to-sentinel
+      request/consent workflow.
 
 - [ ] Migration drift check — the audit found the current live project is
       missing **`00036_shelter_directory_invoker.sql`**: `shelter_contacts`
@@ -249,3 +254,7 @@ $SSH 'journalctl -u nginx --since "5 min ago" -p warning --no-pager'
   key — gateway answers "Unregistered API key"). Purge it
   (`git filter-repo --path .env --invert-paths`) and enable GitHub secret
   scanning so it cannot recur.
+
+For the post-login UX release and migration 00039, see [POST_LOGIN_UX_REVIEW.md](POST_LOGIN_UX_REVIEW.md). Apply 00039 after the security remediation through 00038, before publishing this branch’s frontend.
+
+The Dashboard-fixes integration and intake/document workflow additionally require migration 00040. The authority-to-sentinel request workflow requires migration 00041. See [DASHBOARD_WORKFLOW_INTEGRATION.md](DASHBOARD_WORKFLOW_INTEGRATION.md) for the included changes and rollout order.

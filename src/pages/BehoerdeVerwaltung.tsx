@@ -1,5 +1,7 @@
+import { INTAKE_TYPES, intakeType, protectionStatus } from "@/lib/animal-workflow";
+import { AppFeedback } from "@/components/AppFeedback";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { useAuth } from "@/hooks/auth-context";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -12,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { fetchShelters } from "@/lib/shelters";
 import type { Shelter } from "@/lib/types";
 import { Building2, CheckCircle2, ImagePlus, PawPrint, X } from "lucide-react";
-import { sniffDocument } from "@/lib/uploads";
+import { sniffDocument, uploadId } from "@/lib/uploads";
 import { SpeciesInput } from "@/components/SpeciesInput";
 import { LoadingSnake } from "@/components/ui/loading-snake";
 import { consensusSpecies } from "@/lib/consensus";
@@ -41,6 +43,9 @@ type IdVote = {
 };
 
 const BehoerdeVerwaltung = () => {
+  const navigate = useNavigate();
+  const [speciesBusy, setSpeciesBusy] = useState(false);
+  const [intake, setIntake] = useState("unknown");
   const { user, region, isBehoerde, loading } = useAuth();
   const supabase = useExternalSupabase();
   const { toast } = useToast();
@@ -54,6 +59,7 @@ const BehoerdeVerwaltung = () => {
   // Bestimmungshilfe: unknown-animal requests with expert votes
   const [idRequests, setIdRequests] = useState<IdRequest[]>([]);
   const [idVotes, setIdVotes] = useState<Record<string, IdVote[]>>({});
+  const [idError, setIdError] = useState(false);
   const [idBusy, setIdsBusy] = useState(false);
   const [idHasMore, setIdHasMore] = useState(false);
   const idsFromRef = useRef(0);
@@ -93,15 +99,16 @@ const BehoerdeVerwaltung = () => {
     if (!user || !region) return;
     setCreating(true);
     try {
-      const { error } = await supabase.from("ward_listings").insert({
+      const { data: created, error } = await supabase.from("ward_listings").insert({
         owner_id: user.id, region, common_name: wf.common_name.trim(),
         case_code: wf.case_code.trim(), background: wf.background.trim(),
         care_requirements: wf.care_requirements.trim(), space_requirements: wf.space_requirements.trim(),
         scientific_name: wf.scientific_name.trim() || null, cites_listing: wf.cites_listing || null,
-        urgency: "standard", visibility: "vetted_only",
-      });
+        urgency: "standard", visibility: "vetted_only", intake_type: intake,
+      }).select("id, case_code").single();
       if (error) throw error;
-      toast({ title: "Ward erstellt" });
+      toast({ title: "Tier aufgenommen", description: "Dokumente werden vorbereitet." });
+      if (created) navigate(`/wards?search=${encodeURIComponent(created.case_code)}&documents=${created.id}`);
       setWf({ common_name: "", background: "", care_requirements: "", space_requirements: "", case_code: "", scientific_name: "", cites_listing: "" });
     } catch (e) {
       toast({ title: "Fehler", description: (e as Error).message, variant: "destructive" });
@@ -111,24 +118,26 @@ const BehoerdeVerwaltung = () => {
   };
 
   const loadIdRequests = useCallback(async (reset = false) => {
-    setIdsBusy(true);
+    setIdsBusy(true); setIdError(false);
     try {
       const from = reset ? 0 : idsFromRef.current;
-      const { data: reqs } = await supabase
+      const { data: reqs, error: reqError } = await supabase
         .from("identification_requests")
         .select("*")
         .order("created_at", { ascending: false })
         .range(from, from + 19);
+      if (reqError) throw reqError;
       const list = (reqs ?? []) as unknown as IdRequest[];
       setIdRequests(reset ? list : (prev) => [...prev, ...list]);
       idsFromRef.current = reset ? list.length : idsFromRef.current + list.length;
       setIdHasMore(list.length === 20);
       if (list.length === 0) return;
-      const { data: votes } = await supabase
+      const { data: votes, error: voteError } = await supabase
         .from("identification_votes")
         .select("*")
         .in("request_id", list.map((r) => r.id))
         .order("created_at", { ascending: true });
+      if (voteError) throw voteError;
       const map: Record<string, IdVote[]> = {};
       (votes ?? []).forEach((v) => (map[v.request_id] ??= []).push(v as unknown as IdVote));
       setIdVotes((prev) => (reset ? map : { ...prev, ...map }));
@@ -139,7 +148,7 @@ const BehoerdeVerwaltung = () => {
         (urls ?? []).forEach((u, i) => { if (u.signedUrl) urlMap[photoPaths[i]] = u.signedUrl; });
         setIdPhotoUrls((prev) => ({ ...prev, ...urlMap }));
       }
-    } finally {
+    } catch { setIdError(true); } finally {
       setIdsBusy(false);
     }
   }, [supabase]);
@@ -157,7 +166,7 @@ const BehoerdeVerwaltung = () => {
       for (const file of idForm.photos) {
         const img = await sniffDocument(file);
         if (!img) throw new Error(`${file.name}: nur JPG/PNG/WebP/GIF/AVIF/PDF bis 10 MB.`);
-        const path = `${user.id}/${crypto.randomUUID()}.${img.ext}`;
+        const path = `${user.id}/${uploadId()}.${img.ext}`;
         const { error: upErr } = await supabase.storage
           .from("id-photos")
           .upload(path, file, { contentType: img.mime, upsert: false });
@@ -175,7 +184,7 @@ const BehoerdeVerwaltung = () => {
       toast({ title: "Bestimmungsanfrage erstellt", description: "Verifizierte Experten werden um Einschätzung gebeten." });
       setIdForm({ common_name: "", description: "", photos: [] });
       setIdFormOpen(false);
-      void loadIdRequests();
+      void loadIdRequests(true);
     } catch (err) {
       // Remove orphaned uploads so a failed insert doesn't leak storage.
       if (paths.length > 0) await supabase.storage.from("id-photos").remove(paths).catch(() => {});
@@ -198,7 +207,7 @@ const BehoerdeVerwaltung = () => {
     // ponytail: confirmation lives on the request only — no ward linkage exists.
     // Auto-propagate into ward_listings if a ward_id FK is ever added.
     toast({ title: "Art bestätigt", description: `${confirmed_species} wurde als bestätigt gespeichert.` });
-    void loadIdRequests();
+    void loadIdRequests(true);
   };
 
   const closeIdRequest = async (reqId: string) => {
@@ -208,7 +217,7 @@ const BehoerdeVerwaltung = () => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
       return;
     }
-    void loadIdRequests();
+    void loadIdRequests(true);
   };
 
   // --- Guard states ---
@@ -271,6 +280,7 @@ const BehoerdeVerwaltung = () => {
           {/* Ward creation */}
           <section>
             <h2 className="font-display text-2xl flex items-center gap-2"><PawPrint className="h-5 w-5 text-primary" /> Ward erfassen</h2>
+            <Button asChild variant="outline" className="mt-4"><Link to="/wards?new=1">Vollständige Aufnahme mit Fotos und Zuweisung</Link></Button>
             <form onSubmit={createWard} className="mt-4 grid gap-4 border border-border bg-surface p-6 md:grid-cols-2">
               <div>
                 <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Case-Code *</Label>
@@ -282,11 +292,14 @@ const BehoerdeVerwaltung = () => {
               </div>
               <div className="md:col-span-2">
                 <SpeciesInput
+                  onBusyChange={setSpeciesBusy}
                   value={wf.scientific_name}
                   onChange={(v) => setWf((p) => ({ ...p, scientific_name: v }))}
                   onListingChange={(l) => setWf((p) => ({ ...p, cites_listing: l }))}
                 />
               </div>
+              <div><Label htmlFor="authority-intake">Aufnahmegrund · Verpflichtend</Label><select id="authority-intake" required value={intake} onChange={(e) => setIntake(intakeType(e.target.value))} className="mt-1 h-10 w-full border border-border bg-background px-3 text-sm">{Object.entries(INTAKE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
+              <p className="self-center text-sm text-muted-foreground">{protectionStatus(wf.cites_listing).label} · wird in die Tierakte übernommen.</p>
               <div className="md:col-span-2">
                 <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Hintergrund *</Label>
                 <Textarea required rows={2} value={wf.background} onChange={(e) => setWf((p) => ({ ...p, background: e.target.value }))} className="mt-1" />
@@ -300,7 +313,7 @@ const BehoerdeVerwaltung = () => {
                 <Textarea required rows={2} value={wf.space_requirements} onChange={(e) => setWf((p) => ({ ...p, space_requirements: e.target.value }))} className="mt-1" />
               </div>
               <div className="md:col-span-2 flex justify-end">
-                <Button type="submit" disabled={creating}>{creating ? "Erstelle …" : "Ward speichern"}</Button>
+                <Button type="submit" disabled={creating || speciesBusy}>{creating ? "Erstelle …" : "Ward speichern"}</Button>
               </div>
             </form>
           </section>
@@ -317,6 +330,7 @@ const BehoerdeVerwaltung = () => {
               Falsche Artbestimmung gefährdet Fälle. Lade Fotos hoch — Sentinels der höchsten Zertifizierungsstufe (S4) bestimmen Art und Schutzstatus, bevor das Tier offiziell vermittelt wird.
             </p>
 
+            {idError && <AppFeedback title="Bestimmungsanfragen nicht verfügbar" message="Bitte versuche es erneut." onRetry={() => void loadIdRequests(true)} />}
             {idFormOpen && (
               <form onSubmit={submitIdRequest} className="mt-4 grid gap-4 border border-border bg-surface p-6 md:grid-cols-2">
                 <div>

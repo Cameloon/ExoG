@@ -11,6 +11,14 @@ export const HABITAT_CATEGORIES: { key: string; label: string }[] = [
 
 export type CapacityMap = Record<string, number>;
 
+export function formatCapacity(raw: string | null | undefined): string {
+  if (!raw) return "Keine Kapazität angegeben";
+  const capacity = parseCapacity(raw);
+  const labels = HABITAT_CATEGORIES.filter((h) => capacity[h.key] > 0)
+    .map((h) => `${capacity[h.key]} × ${h.label}`);
+  return labels.length ? labels.join(" · ") : raw.trim().startsWith("{") ? "Keine Plätze angegeben" : raw;
+}
+
 export function parseCapacity(raw: string | null | undefined): CapacityMap {
   const empty: CapacityMap = {};
   for (const h of HABITAT_CATEGORIES) empty[h.key] = 0;

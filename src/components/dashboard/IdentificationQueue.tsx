@@ -1,3 +1,4 @@
+import { AppFeedback } from "@/components/AppFeedback";
 import { useCallback, useEffect, useState } from "react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { useAuth } from "@/hooks/auth-context";
@@ -32,26 +33,31 @@ export const IdentificationQueue = () => {
   const [requests, setRequests] = useState<IdRequest[]>([]);
   const [votes, setVotes] = useState<Record<string, IdVote[]>>({});
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  const [page, setPage] = useState(0);
+  const [error, setError] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [busy, setBusy] = useState(true);
   const [draft, setDraft] = useState<Record<string, { species: string; listing: string; confidence: string; note: string }>>({});
   const [submitting, setSubmitting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setBusy(true);
+    setBusy(true); setError(false);
     try {
-      const { data: reqs } = await supabase
+      const { data: reqs, error: reqError } = await supabase
         .from("identification_requests")
         .select("*")
         .eq("status", "open")
         .order("created_at", { ascending: false })
-        .range(0, 19);
+        .range(page * 20, page * 20 + 19);
+      if (reqError) throw reqError;
       const list = (reqs ?? []) as unknown as IdRequest[];
-      setRequests(list);
+      setRequests(list); setHasMore(list.length === 20);
       if (list.length === 0) { setVotes({}); return; }
-      const { data: v } = await supabase
+      const { data: v, error: voteError } = await supabase
         .from("identification_votes")
         .select("*")
         .in("request_id", list.map((r) => r.id));
+      if (voteError) throw voteError;
       const map: Record<string, IdVote[]> = {};
       (v ?? []).forEach((x) => (map[x.request_id] ??= []).push(x as unknown as IdVote));
       setVotes(map);
@@ -63,11 +69,11 @@ export const IdentificationQueue = () => {
         setPhotoUrls(umap);
       }
     } catch (e) {
-      console.error("[IdentificationQueue] load failed:", e);
+      setError(true);
     } finally {
       setBusy(false);
     }
-  }, [supabase]);
+  }, [supabase, page]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -103,7 +109,7 @@ export const IdentificationQueue = () => {
       </div>
       {busy ? (
         <p className="p-5 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Lade Anfragen …</p>
-      ) : requests.length === 0 ? (
+      ) : error ? <AppFeedback title="Bestimmungsanfragen nicht verfügbar" message="Bitte versuche es erneut." onRetry={() => void load()} /> : requests.length === 0 ? (
         <p className="p-5 text-sm text-muted-foreground">Keine offenen Bestimmungsanfragen.</p>
       ) : (
         <ul className="divide-y divide-border">
@@ -113,7 +119,7 @@ export const IdentificationQueue = () => {
             return (
               <li key={r.id} className="p-5">
                 <div className="flex flex-wrap gap-4">
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {r.photos.slice(0, 4).map((p) => (
                       photoUrls[p]
                         ? <a key={p} href={photoUrls[p]} target="_blank" rel="noopener noreferrer" className="block h-20 w-20 overflow-hidden border border-border">
@@ -154,7 +160,7 @@ export const IdentificationQueue = () => {
                       onChange={(v) => setDraft((p) => ({ ...p, [r.id]: { species: v, listing: p[r.id]?.listing ?? "", confidence: p[r.id]?.confidence ?? "mittel", note: p[r.id]?.note ?? "" } }))}
                       onListingChange={(l) => setDraft((p) => ({ ...p, [r.id]: { species: p[r.id]?.species ?? "", listing: l, confidence: p[r.id]?.confidence ?? "mittel", note: p[r.id]?.note ?? "" } }))}
                     />
-                    <select
+                    <select aria-label="Sicherheit des Gutachtens"
                       value={d?.confidence ?? "mittel"}
                       onChange={(e) => setDraft((p) => ({ ...p, [r.id]: { species: p[r.id]?.species ?? "", listing: p[r.id]?.listing ?? "", confidence: e.target.value, note: p[r.id]?.note ?? "" } }))}
                       className="mt-2 h-10 self-end border border-border bg-background px-2 text-sm"
@@ -173,6 +179,7 @@ export const IdentificationQueue = () => {
           })}
         </ul>
       )}
+      <div className="flex flex-wrap items-center gap-3 border-t border-border p-5"><Button size="sm" variant="outline" disabled={busy || page === 0} onClick={() => setPage((v) => v - 1)}>Zurück</Button><span className="text-sm">Seite {page + 1}</span><Button size="sm" variant="outline" disabled={busy || !hasMore} onClick={() => setPage((v) => v + 1)}>Weiter</Button></div>
     </section>
   );
 };

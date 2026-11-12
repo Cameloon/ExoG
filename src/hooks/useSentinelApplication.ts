@@ -15,12 +15,16 @@ export function useSentinelApplication() {
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [revision, setRevision] = useState(0);
+
   useEffect(() => {
     if (loading || !user) {
-      setChecking(false);
+      setChecking(loading);
+      setStatus(null); setError(null);
       return;
     }
     let active = true;
+    setChecking(true); setError(null);
     (async () => {
       // ponytail: a transient network error must not read as "no application"
       // — that would let the user re-apply and hit a server 409.
@@ -42,7 +46,7 @@ export function useSentinelApplication() {
     return () => {
       active = false;
     };
-  }, [user, loading, supabase]);
+  }, [user, loading, supabase, revision]);
 
-  return { status, checking, error, hasApplication: status !== null, isApproved: status === "approved" };
+  return { retry: () => setRevision((v) => v + 1), status, checking, error, hasApplication: status !== null, isApproved: status === "approved" };
 }

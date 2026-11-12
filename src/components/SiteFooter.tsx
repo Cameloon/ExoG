@@ -23,10 +23,10 @@ export const SiteFooter = () => (
         <div>
           <h4 className="eyebrow mb-4">Plattform</h4>
           <ul className="space-y-2 text-sm text-muted-foreground">
-            <li><a href="#system" className="hover:text-foreground">Behörden</a></li>
-            <li><a href="#system" className="hover:text-foreground">Stewards</a></li>
-            <li><a href="#workflow" className="hover:text-foreground">Ablauf</a></li>
-            <li><a href="#recht" className="hover:text-foreground">CITES & TierSchG</a></li>
+            <li><a href="/#ablauf" className="hover:text-foreground">Behörden</a></li>
+            <li><a href="/#sentinel" className="hover:text-foreground">Stewards</a></li>
+            <li><a href="/#ablauf" className="hover:text-foreground">Ablauf</a></li>
+            <li><Link to="/werte" className="hover:text-foreground">CITES & TierSchG</Link></li>
           </ul>
         </div>
 
@@ -35,7 +35,7 @@ export const SiteFooter = () => (
           <ul className="space-y-2 text-sm text-muted-foreground">
             <li><Link to="/datenschutz" className="hover:text-foreground">Datenschutz</Link></li>
             <li><Link to="/impressum" className="hover:text-foreground">Impressum</Link></li>
-            <li><a href="#recht" className="hover:text-foreground">Sicherheit</a></li>
+            <li><Link to="/datenschutz" className="hover:text-foreground">Sicherheit</Link></li>
             <li><Link to="/datenschutz" className="hover:text-foreground">DSGVO-Auftragsverarbeitung</Link></li>
           </ul>
         </div>

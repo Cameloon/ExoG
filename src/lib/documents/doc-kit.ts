@@ -11,18 +11,15 @@ import { sign } from "@/lib/care-log-validation";
 
 export const DOC_KIT_VERSION = "1.0.0";
 
-/** Zentrale Absender-Stammdaten (Demo) — konsistent mit care-log-export. */
+/** Neutral fallback; live documents use the account that prepares them. */
 export const SENDER = {
-  org: "ExoGuard / BioSteward gGmbH",
-  unit: "Koordinationsstelle Wildtier-Sicherstellung",
-  street: "Tiergartenstraße 14",
-  city: "10117 Berlin",
-  country: "Deutschland",
-  phone: "+49 30 555 014-200",
-  email: "akten@exoguard.example",
-  dpo: "datenschutz@exoguard.example",
-  registry: "AG Berlin-Charlottenburg, HRB 274519 B",
+  org: "ExoGuard / BioSteward", unit: "Digital erstelltes Falldokument",
+  street: "", city: "", country: "", phone: "", email: "", dpo: "", registry: "",
 };
+export function documentSender(actor: { name: string; contact: { address: string; phone: string; email: string } }) {
+  return { ...SENDER, org: actor.name || SENDER.org, street: actor.contact.address,
+    phone: actor.contact.phone, email: actor.contact.email };
+}
 
 export const CONFIDENTIALITY_NOTICE =
   "Dieses Dokument enthält personenbezogene Daten im Sinne der DSGVO sowie behördlich vertrauliche Informationen. Die Verarbeitung erfolgt zur Erfüllung einer rechtlichen Verpflichtung (Art. 6 Abs. 1 lit. c DSGVO) und im öffentlichen Interesse (Art. 6 Abs. 1 lit. e DSGVO) im Rahmen des BNatSchG, TierSchG und der BArtSchV. Weitergabe ausschließlich an befugte Stellen. Unbefugte Vervielfältigung, Speicherung oder Weitergabe an Dritte ist untersagt und kann straf- sowie aufsichtsrechtliche Folgen haben (§ 203 StGB, Art. 83 DSGVO). Die enthaltenen Signaturen dienen der Integritätssicherung der Demo-Plattform und ersetzen keine qualifizierte elektronische Signatur (eIDAS).";
@@ -52,6 +49,9 @@ export type DocMeta = {
   generatedAt: string;
   /** Bearbeitende Person */
   authoredBy: string;
+  sender?: typeof SENDER;
+  draft?: boolean;
+  missingFields?: string[];
 };
 
 type CoverLayout = {
@@ -114,6 +114,7 @@ export function defList(
 
 /** Zeichnet das einheitliche Deckblatt und liefert die Position für das Seitenanzahl-Patch. */
 export function drawCoverPage(doc: jsPDF, meta: DocMeta, subject: string): CoverLayout {
+  const SENDER = meta.sender ?? { ...documentSender({ name: meta.authoredBy, contact: { address: "", phone: "", email: "" } }) };
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 56;
@@ -125,7 +126,7 @@ export function drawCoverPage(doc: jsPDF, meta: DocMeta, subject: string): Cover
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(120);
-  doc.text("VERTRAULICH · BEHÖRDLICHER GEBRAUCH", margin, y + 18);
+  doc.text(meta.draft ? "ENTWURF · UNVOLLSTÄNDIG · VERTRAULICH" : "ZUR PRÜFUNG UND UNTERSCHRIFT · VERTRAULICH", margin, y + 18);
   y += 48;
 
   doc.setTextColor(0);
@@ -181,11 +182,11 @@ export function drawCoverPage(doc: jsPDF, meta: DocMeta, subject: string): Cover
   [
     SENDER.org,
     SENDER.unit,
-    `${SENDER.street}, ${SENDER.city}, ${SENDER.country}`,
-    `Tel.: ${SENDER.phone}    ·    E-Mail: ${SENDER.email}`,
-    `Datenschutzbeauftragte/r: ${SENDER.dpo}`,
-    `Registereintrag: ${SENDER.registry}`,
-  ].forEach((l) => {
+    [SENDER.street, SENDER.city, SENDER.country].filter(Boolean).join(", "),
+    [SENDER.phone && `Tel.: ${SENDER.phone}`, SENDER.email && `E-Mail: ${SENDER.email}`].filter(Boolean).join(" · "),
+    SENDER.dpo ? `Datenschutzbeauftragte/r: ${SENDER.dpo}` : "",
+    SENDER.registry ? `Registereintrag: ${SENDER.registry}` : "",
+  ].filter(Boolean).forEach((l) => {
     doc.text(l, margin, y);
     y += 12;
   });
@@ -464,8 +465,11 @@ export function buildManifest(
   files: { pdf: string; json: string },
   attachments: Attachment[] = [],
 ) {
+  const SENDER = meta.sender ?? documentSender({ name: meta.authoredBy, contact: { address: "", phone: "", email: "" } });
   return [
     `ExoGuard / BioSteward — ${meta.title}`,
+    `Status: ${meta.draft ? "ENTWURF / unvollständig" : "Zur Prüfung und Unterschrift"}`,
+    ...(meta.missingFields?.length ? [`Noch erforderlich: ${meta.missingFields.join(", ")}`] : []),
     "----------------------------------------",
     `Dokument-Version: ${meta.version}`,
     `Dokument-ID:    ${meta.docId}`,

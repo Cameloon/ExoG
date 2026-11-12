@@ -81,11 +81,12 @@ export async function fetchMyShelter(
 
   // Private fields live in shelter_contacts (owner-only RLS). A missing row
   // just means the profile was created before 00036 — treat as empty.
-  const { data: contacts } = await supabase
+  const { data: contacts, error: contactsError } = await supabase
     .from("shelter_contacts")
     .select("address, contact_email, contact_phone, lat, lng")
     .eq("shelter_id", data.id)
     .maybeSingle();
+  if (contactsError) throw contactsError;
   return {
     ...data,
     address: contacts?.address ?? null,
@@ -250,9 +251,8 @@ export async function setInterestStatus(
   id: string,
   status: "matched" | "declined",
 ): Promise<void> {
-  const { error } = await supabase
-    .from("ward_interest")
-    .update({ status })
-    .eq("id", id);
+  const { error } = status === "matched"
+    ? await supabase.rpc("match_ward_interest", { p_id: id })
+    : await supabase.from("ward_interest").update({ status }).eq("id", id).select("id").single();
   if (error) throw error;
 }

@@ -1,3 +1,4 @@
+import { PageLoader } from "@/components/ui/loading-snake";
 import { Navigate } from "react-router-dom";
 import { SentinelWizard } from "@/components/sections/SentinelWizard";
 import { useSentinelApplication } from "@/hooks/useSentinelApplication";
@@ -7,7 +8,7 @@ const SentinelApply = () => {
   const { isAdmin, isBehoerde, isEinrichtung, isSentinel } = useAuth();
   const { status, checking, error, isApproved } = useSentinelApplication();
 
-  if (checking) return null;
+  if (checking) return <PageLoader label="Prüfe Antragsstatus" />;
   // Never let a lookup error masquerade as "no application" — the user would
   // re-apply and hit a server 409.
   if (error) {

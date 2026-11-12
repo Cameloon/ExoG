@@ -5,6 +5,7 @@ import { useSignIn, useSignUp } from "@clerk/clerk-react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { SiteHeader } from "@/components/SiteHeader";
 import { useAuth } from "@/hooks/auth-context";
+import { returnDestination } from "@/lib/app-navigation";
 import { useSentinelApplication } from "@/hooks/useSentinelApplication";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,17 +76,15 @@ const Auth = () => {
     sentinel: "/dashboard",
   };
   const isEstablishedRole = isAdmin || isBehoerde || isEinrichtung || isSentinel;
-  const sentinelWizardTarget = isEstablishedRole
-    ? (homeForRole[role] ?? "/dashboard")
-    : intendedRole === "sentinel"
-      ? "/sentinel/apply"
-      : "/shelters";
+  const requested = returnDestination((location.state as { from?: unknown } | null)?.from);
+  const authTarget = mode === "signin"
+    ? (requested === "/sentinel/apply" && isEstablishedRole ? homeForRole[role] : requested) ?? "/dashboard"
+    : isEstablishedRole ? homeForRole[role] ?? "/dashboard"
+      : intendedRole === "shelter" ? "/shelters" : "/sentinel/apply";
 
   useEffect(() => {
-    if (!loading && user) {
-      navigate(sentinelWizardTarget, { replace: true });
-    }
-  }, [loading, user, navigate, sentinelWizardTarget]);
+    if (!loading && user && !busy) navigate(authTarget, { replace: true });
+  }, [loading, user, navigate, authTarget, busy]);
 
   const finishAuth = async (
     createdSessionId: string | null | undefined,
@@ -108,7 +107,7 @@ const Auth = () => {
         // non-blocking: admin queue can still be seeded manually
       }
     }
-    navigate(sentinelWizardTarget, { replace: true });
+    // Navigation waits for AuthProvider to finish resolving the new role.
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -413,25 +412,23 @@ const Auth = () => {
             </div>
             <button
               type="button"
-              onClick={() => {
-                const oauthDone = sentinelWizardTarget;
-                if (mode === "signup") {
-                  if (!signUpFlow.isLoaded) return;
-                  signUpFlow.signUp.authenticateWithRedirect({
+              onClick={async () => {
+                if (!signInFlow.isLoaded || !signUpFlow.isLoaded || busy) return;
+                setBusy(true);
+                try {
+                  const flow = mode === "signup" ? signUpFlow.signUp : signInFlow.signIn;
+                  await flow.authenticateWithRedirect({
                     strategy: "oauth_google",
-                    redirectUrl: "/auth",
-                    redirectUrlComplete: oauthDone,
+                    redirectUrl: "/sso-callback",
+                    redirectUrlComplete: authTarget,
                   });
-                } else {
-                  if (!signInFlow.isLoaded) return;
-                  signInFlow.signIn.authenticateWithRedirect({
-                    strategy: "oauth_google",
-                    redirectUrl: "/auth",
-                    redirectUrlComplete: oauthDone,
-                  });
+                } catch (err) {
+                  toast({ title: "Google-Anmeldung nicht möglich", description: getClerkErrorMessage(err), variant: "destructive" });
+                } finally {
+                  setBusy(false);
                 }
               }}
-              disabled={!signInFlow.isLoaded || !signUpFlow.isLoaded}
+              disabled={busy || !signInFlow.isLoaded || !signUpFlow.isLoaded}
               className="mt-5 flex w-full items-center justify-center gap-3 border border-border bg-surface px-4 py-3 font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:opacity-50"
             >
               <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden>

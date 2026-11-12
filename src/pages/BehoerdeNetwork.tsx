@@ -1,3 +1,4 @@
+import { formatCapacity } from "@/lib/habitats";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { GlowMap } from "@/components/GlowMap";
@@ -90,7 +91,7 @@ const SentinelCard = ({ s }: { s: NetworkSentinel }) => {
 
       <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3">
         <Detail icon={<GraduationCap className="h-3.5 w-3.5" />} label="Zertifizierung" value={tierLabel[s.tier ?? ""]} />
-        <Detail icon={<Boxes className="h-3.5 w-3.5" />} label="Kapazität" value={s.capacity ?? undefined} />
+        <Detail icon={<Boxes className="h-3.5 w-3.5" />} label="Kapazität" value={formatCapacity(s.capacity)} />
         <Detail icon={<PawPrint className="h-3.5 w-3.5" />} label="Artenspektrum" value={s.species_focus ?? undefined} />
         <Detail icon={<Thermometer className="h-3.5 w-3.5" />} label="Erfahrung" value={s.experience_years ? `${s.experience_years} Jahre` : undefined} />
         <Detail icon={<Container className="h-3.5 w-3.5" />} label="Terraristik" value={terrarium || undefined} />
@@ -171,7 +172,7 @@ const BehoerdeNetwork = () => {
         const q = s.pledge_data?.questionnaire;
         const key = [q?.zip, q?.city, s.region, "Deutschland"].filter(Boolean).join(", ");
         const pos = await geocode(key);
-        if (pos && !cancelled) out.push({ key: s.user_id, name: s.full_name, tier: s.tier, capacity: s.capacity, lat: pos[0], lng: pos[1] });
+        if (pos && !cancelled) out.push({ key: s.user_id, name: s.full_name, tier: s.tier, capacity: formatCapacity(s.capacity), lat: pos[0], lng: pos[1] });
       }
     };
     void Promise.all([worker(), worker(), worker()]).then(() => {

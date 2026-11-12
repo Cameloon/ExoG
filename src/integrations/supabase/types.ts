@@ -456,6 +456,7 @@ export type Database = {
           // Hand-added (00021_care_and_identification.sql) until types are regenerated.
           lab_report_path: string | null
           legal_custody: boolean
+          intake_type: string
           origin_context: string | null
           owner_id: string
           placement_type: Database["public"]["Enums"]["placement_type"]
@@ -484,6 +485,7 @@ export type Database = {
           images?: string[]
           lab_report_path?: string | null
           legal_custody?: boolean
+          intake_type?: string
           origin_context?: string | null
           owner_id: string
           placement_type?: Database["public"]["Enums"]["placement_type"]
@@ -512,6 +514,7 @@ export type Database = {
           images?: string[]
           lab_report_path?: string | null
           legal_custody?: boolean
+          intake_type?: string
           origin_context?: string | null
           owner_id?: string
           placement_type?: Database["public"]["Enums"]["placement_type"]
@@ -728,6 +731,50 @@ export type Database = {
         }
         Relationships: []
       }
+      authority_ward_assignment_requests: {
+        Row: {
+          authority_id: string
+          created_at: string
+          id: string
+          message: string | null
+          responded_at: string | null
+          sentinel_id: string
+          status: "open" | "accepted" | "declined" | "cancelled"
+          updated_at: string
+          ward_id: string
+        }
+        Insert: {
+          authority_id: string
+          created_at?: string
+          id?: string
+          message?: string | null
+          responded_at?: string | null
+          sentinel_id: string
+          status?: "open" | "accepted" | "declined" | "cancelled"
+          updated_at?: string
+          ward_id: string
+        }
+        Update: {
+          authority_id?: string
+          created_at?: string
+          id?: string
+          message?: string | null
+          responded_at?: string | null
+          sentinel_id?: string
+          status?: "open" | "accepted" | "declined" | "cancelled"
+          updated_at?: string
+          ward_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "authority_ward_assignment_requests_ward_id_fkey"
+            columns: ["ward_id"]
+            isOneToOne: false
+            referencedRelation: "ward_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sentinel_shelter_requests: {
         Row: {
           id: string
@@ -887,6 +934,9 @@ export type Database = {
       }
     }
     Functions: {
+      review_sentinel_application: { Args: { p_id: string; p_status: Database["public"]["Enums"]["application_status"]; p_tier: string; p_notes?: string }; Returns: undefined }
+      match_ward_interest: { Args: { p_id: string }; Returns: undefined }
+      respond_authority_ward_assignment_request: { Args: { p_id: string; p_accept: boolean }; Returns: string }
       can_browse_sentinels: { Args: Record<string, never>; Returns: boolean }
       sentinel_region_counts: { Args: Record<string, never>; Returns: { region: string; total: number }[] }
       list_sentinels: {

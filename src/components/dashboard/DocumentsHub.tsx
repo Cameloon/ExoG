@@ -1,4 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, cloneElement, isValidElement, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { documentPlan, INTAKE_TYPES, knownValue, localDateTime, type DocumentKey } from "@/lib/animal-workflow";
+import { documentRequirements, missingRequirements, type Requirement } from "@/lib/documents/requirements";
+import { exportIntakeHandover } from "@/lib/documents/intake-handover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -93,7 +97,7 @@ function AttachmentsField({
 
       <div className="mt-2 flex flex-wrap items-center gap-2 border border-dashed border-border bg-background/40 p-3">
         <select
-          value={pendingKind}
+          aria-label="Art des Anhangs" value={pendingKind}
           onChange={(e) => setPendingKind(e.target.value as AttachmentKind)}
           className="h-9 border border-border bg-background px-2 font-mono text-xs"
         >
@@ -141,7 +145,7 @@ function AttachmentsField({
                   SHA-256 {a.sha256.slice(0, 24)}…
                 </div>
                 <Input
-                  value={a.note ?? ""}
+                  aria-label={`Beschreibung für ${a.name}`} value={a.note ?? ""}
                   onChange={(e) => updateNote(i, e.target.value)}
                   placeholder="Notiz / Beschreibung (optional)"
                   className="mt-2 h-8 border-border bg-background font-mono text-xs"
@@ -149,7 +153,7 @@ function AttachmentsField({
               </div>
               <div className="flex items-center gap-2">
                 <select
-                  value={a.kind}
+                  aria-label={`Art des Anhangs ${a.name}`} value={a.kind}
                   onChange={(e) => updateKind(i, e.target.value as AttachmentKind)}
                   className="h-8 border border-border bg-background px-2 font-mono text-xs"
                 >
@@ -180,11 +184,14 @@ function AttachmentsField({
 type Props = {
   caseRecord: CaseRecord;
   sentinel: SentinelProfile;
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
-type DocKey = "seizure" | "found" | "adoption" | "cites";
+type DocKey = DocumentKey;
+const RequiredFields = createContext<Requirement[]>([]);
 
 const DOC_TYPES: { key: DocKey; label: string; icon: typeof FileText; desc: string }[] = [
+  { key: "intake", label: "Aufnahme / Abgabe", icon: HeartHandshake, desc: "Aufnahme und tatsächliche Übergabe bei Abgabe, Übernahme oder ungeklärtem Aufnahmegrund dokumentieren." },
   {
     key: "seizure",
     label: "Sicherstellung",
@@ -207,7 +214,7 @@ const DOC_TYPES: { key: DocKey; label: string; icon: typeof FileText; desc: stri
     key: "cites",
     label: "CITES-Übergabe",
     icon: FileCheck2,
-    desc: "Herkunftsnachweis & Übergabeprotokoll an Behörde (BArtSchV / EG 338/97).",
+    desc: "Vorhandene Herkunftsnachweise und offene Fragen zur Übergabe festhalten. Erstellt keine amtliche CITES-Bescheinigung.",
   },
 ];
 
@@ -216,45 +223,62 @@ const labelCls =
 const inputCls = "mt-1 h-9 border-border bg-background font-mono text-sm";
 const textareaCls = "mt-1 min-h-[72px] resize-none border-border bg-background font-mono text-sm";
 
-const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
-  <div>
-    <label className={labelCls}>{label}</label>
-    {children}
-  </div>
-);
+const Field = ({ label, children }: { label: string; children: React.ReactNode }) => {
+  const id = useId();
+  const rule = useContext(RequiredFields).find((item) => item.label === label);
+  return <div className="min-w-0" data-document-field={label} tabIndex={-1}>
+    <label htmlFor={id} className={labelCls}>{label}{rule && <span className="ml-2 text-primary">Verpflichtend</span>}</label>
+    {isValidElement<{ id?: string; required?: boolean; "aria-required"?: boolean; minLength?: number; min?: number }>(children)
+      ? cloneElement(children, { id, required: Boolean(rule), "aria-required": Boolean(rule), minLength: rule?.minLength, min: rule?.min }) : children}
+    {rule?.minLength && <p className="mt-1 text-xs text-muted-foreground">Mindestens {rule.minLength} Zeichen.</p>}
+  </div>;
+};
 
-export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
-  const [active, setActive] = useState<DocKey>("seizure");
+export const DocumentsHub = ({ caseRecord, sentinel, onDirtyChange }: Props) => {
+  const [dirtyDocs, setDirtyDocs] = useState<Partial<Record<DocKey, boolean>>>({});
+  const dirty = Object.values(dirtyDocs).some(Boolean);
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  const plan = documentPlan(caseRecord);
+  const [active, setActive] = useState<DocKey>(plan.primary);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [attempted, setAttempted] = useState(false);
+  const [completed, setCompleted] = useState<Partial<Record<DocKey, boolean>>>({});
   const [busy, setBusy] = useState(false);
 
   // ---------- shared state per doc ----------
   // Sicherstellung
   const [seizure, setSeizure] = useState({
     location: "",
-    occurredAt: new Date().toISOString().slice(0, 16).replace("T", " "),
-    legalBasis: "§ 16a TierSchG",
-    circumstances: "",
+    occurredAt: localDateTime(),
+    legalBasis: "",
+    circumstances: caseRecord.originContext || caseRecord.background || "",
     holder: "",
     identMarks: "",
     conditionAtSeizure: "",
     witnesses: "",
     custodyLocation: `${sentinel.name} · Region ${sentinel.region}`,
-    authorityOfficer: caseRecord.authority,
+    authorityOfficer: knownValue(caseRecord.authority),
   });
 
   // Fundtier
   const [found, setFound] = useState({
-    foundAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+    foundAt: localDateTime(),
     foundLocation: "",
     finderName: "",
     finderContact: "",
-    circumstances: "",
+    circumstances: caseRecord.originContext || caseRecord.background || "",
     identMarks: "",
-    estimatedAge: "",
+    estimatedAge: knownValue(caseRecord.age),
     health: "",
     custodyLocation: `${sentinel.name} · Region ${sentinel.region}`,
-    reportedAuthority: caseRecord.authority,
-    reportedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+    reportedAuthority: "",
+    reportedAt: "",
   });
 
   // Adoption
@@ -274,7 +298,7 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
     vetReference: "",
     protectionFee: "",
     handoverDate: "",
-    conditions: "",
+    conditions: [caseRecord.careRequirements, caseRecord.spaceRequirements].filter(Boolean).join("\n"),
   });
 
   const eligibility = useMemo(
@@ -291,38 +315,70 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
     citesCertificateNo: "",
     issuingAuthority: "",
     issuedAt: "",
-    markerType: "Transponder (ISO 11784/85)",
+    certificateStatus: "unknown",
+    missingEvidence: "",
+    markerType: "Noch ungeklärt / keine Kennzeichnung dokumentiert",
     markerId: "",
-    acquisitionPath: "",
+    acquisitionPath: plan.origin === "unknown" ? "" : `${INTAKE_TYPES[plan.origin]}${caseRecord.originContext ? ` · ${caseRecord.originContext}` : ""}`,
     handoverPurpose: "Übergabe an zuständige Behörde zur weiteren Verwahrung",
-    receivingAuthority: caseRecord.authority,
+    receivingAuthority: knownValue(caseRecord.authority),
     receivingOfficer: "",
     handoverLocation: "",
-    handoverAt: new Date().toISOString().slice(0, 16).replace("T", " "),
-    attachments: "Pflege-Log-Export (PDF+JSON), Tierärztliches Attest",
+    handoverAt: localDateTime(),
+    attachments: "",
   });
 
-  // Hochgeladene Anhänge pro Dokumenttyp
+  const [intake, setIntake] = useState({
+    handoverAt: localDateTime(), fromName: "", fromContact: "",
+    receivingLocation: `${sentinel.name} · ${sentinel.region}`,
+    circumstances: caseRecord.originContext || caseRecord.background || "", accompanyingDocuments: "",
+  });
   const [adoptionFiles, setAdoptionFiles] = useState<Attachment[]>([]);
   const [citesFiles, setCitesFiles] = useState<Attachment[]>([]);
-  const wrap = async (fn: () => Promise<unknown>, name: string) => {
+  const values = { seizure, found, intake, adoption, cites };
+  const requirements = documentRequirements(active, values[active], caseRecord);
+  const missing = missingRequirements(requirements, values[active]);
+  const focusField = (label: string) => {
+    const field = [...(formRef.current?.querySelectorAll<HTMLElement>("[data-document-field]") ?? [])].find((node) => node.dataset.documentField === label);
+    field?.scrollIntoView({ block: "center", behavior: "smooth" });
+    (field?.querySelector<HTMLElement>("input, textarea, select, button[role=checkbox]") ?? field)?.focus({ preventScroll: true });
+  };
+  const exportCurrent = async (draft: boolean) => {
+    if (busy) return;
+    setAttempted(true);
+    if (!draft && missing.length) { focusField(missing[0].label); return; }
+    if (!draft && !formRef.current?.reportValidity()) return;
+    const common = { caseRecord, sentinel, draft, missingFields: missing.map((item) => item.label) };
     try {
       setBusy(true);
-      await fn();
-      toast({ title: `${name} erstellt`, description: "ZIP-Download gestartet." });
-    } catch (e) {
-      toast({
-        title: "Fehler",
-        description: e instanceof Error ? e.message : "Unbekannter Fehler",
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
-    }
+      if (active === "seizure") await exportSeizureProtocol({ ...common, ...seizure });
+      else if (active === "found") await exportFoundAnimalReport({ ...common, ...found });
+      else if (active === "intake") await exportIntakeHandover({ ...common, ...intake });
+      else if (active === "adoption") await exportAdoptionContract({ ...common, ...adoption, attachmentFiles: adoptionFiles });
+      else await exportCitesHandover({ ...common, ...cites, attachmentFiles: citesFiles });
+      setCompleted((previous) => ({ ...previous, [active]: !draft }));
+      setDirtyDocs((previous) => ({ ...previous, [active]: false }));
+      toast({ title: draft ? "Entwurf heruntergeladen" : "Dokument erstellt", description: "ZIP mit PDF und JSON heruntergeladen. Bitte prüfen und gegebenenfalls unterschreiben." });
+    } catch (error) {
+      toast({ title: "Dokument konnte nicht erstellt werden", description: error instanceof Error ? error.message : "Bitte erneut versuchen.", variant: "destructive" });
+    } finally { setBusy(false); }
   };
 
   return (
     <div className="border border-border bg-surface">
+      <div className="border-b border-border p-5">
+        <h3 className="font-display text-xl">Dokumente für diesen Fall</h3>
+        <p className="mt-2 text-sm">{caseRecord.german} · {plan.protection.label} · {INTAKE_TYPES[plan.origin]}</p>
+        <p className="mt-2 text-xs text-muted-foreground">Tierdaten werden aus der Akte übernommen. Vorausgewählte Vorlagen passen zum Aufnahmegrund; weitere Vorlagen bleiben erreichbar.</p>
+        {plan.protection.review && <p className="mt-2 text-xs text-warning">Schutzstatus prüfen: EU-Anhang, Population und mögliche Ausnahmen anhand der Unterlagen klären. Ein fehlender Treffer bedeutet nicht „ungeschützt“.</p>}
+        <div className="mt-4 flex flex-wrap gap-2" aria-label="Empfohlene Dokumente">
+          {plan.recommended.map((key) => <button type="button" key={key} onClick={() => { setActive(key); setAttempted(false); }} className="border border-primary/30 px-3 py-2 text-left text-xs hover:bg-primary/5">
+            {DOC_TYPES.find((item) => item.key === key)?.label} · {completed[key] ? "Heruntergeladen" : key === plan.primary ? "Aufnahme dokumentieren" : "Nachweise prüfen"}
+          </button>)}
+          {plan.adoptionRelevant && <button type="button" onClick={() => { setActive("adoption"); setAttempted(false); }} className="border border-border px-3 py-2 text-xs">Bei Vermittlung: Adoptionsvertrag</button>}
+        </div>
+        {caseRecord.wardId && <Link onClick={(event) => { if (dirty && !window.confirm("Dokumentangaben verwerfen und Tierdaten bearbeiten?")) event.preventDefault(); }} to={`/wards?search=${encodeURIComponent(caseRecord.id)}&edit=${caseRecord.wardId}`} className="mt-3 inline-block text-xs text-primary underline">Tierdaten / Aufnahmegrund bearbeiten</Link>}
+      </div>
       {/* Tab strip */}
       <div className="flex flex-wrap gap-px bg-border">
         {DOC_TYPES.map((t) => {
@@ -330,7 +386,8 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
           return (
             <button
               key={t.key}
-              onClick={() => setActive(t.key)}
+              aria-pressed={active === t.key}
+              onClick={() => { setActive(t.key); setAttempted(false); }}
               className={`flex flex-1 items-center justify-center gap-2 bg-surface px-4 py-3 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors ${
                 active === t.key ? "text-primary" : "text-muted-foreground hover:text-foreground"
               }`}
@@ -346,7 +403,7 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
         <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div>
             <span className="eyebrow flex items-center gap-2">
-              <FileText className="h-3 w-3" /> Behörden-Dokument
+              <FileText className="h-3 w-3" /> Falldokument
             </span>
             <h3 className="mt-2 text-xl tracking-tight">
               {DOC_TYPES.find((d) => d.key === active)!.label}
@@ -367,12 +424,27 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
         </div>
       </div>
 
-      <div className="p-6">
+      <RequiredFields.Provider value={requirements}>
+      <form ref={formRef} noValidate onSubmit={(event) => { event.preventDefault(); void exportCurrent(false); }} className="p-4 sm:p-6" onChange={() => { setDirtyDocs((previous) => ({ ...previous, [active]: true })); setCompleted((previous) => ({ ...previous, [active]: false })); }}>
+        <p className="mb-4 text-xs text-muted-foreground">„Verpflichtend“ kennzeichnet die Angaben für diese Vorlage. Bekannte Daten sind vorausgefüllt. Entwürfe können auch mit offenen Angaben heruntergeladen werden.</p>
+        {missing.length > 0 && <div className={`mb-5 border p-3 ${attempted ? "border-destructive/50" : "border-border"}`} role={attempted ? "alert" : "status"}>
+          <p className="text-sm">Noch {missing.length} verpflichtende {missing.length === 1 ? "Angabe" : "Angaben"}:</p>
+          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-2">{missing.map((item) => <li key={item.key}><button type="button" className="text-left text-xs text-primary underline" onClick={() => focusField(item.label)}>{item.label}</button></li>)}</ul>
+        </div>}
+        {active === "intake" && <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Datum / Uhrzeit Aufnahme"><Input type="datetime-local" className={inputCls} value={intake.handoverAt} onChange={(e) => setIntake({ ...intake, handoverAt: e.target.value })} /></Field>
+          <Field label="Aufnahmeort"><Input className={inputCls} value={intake.receivingLocation} onChange={(e) => setIntake({ ...intake, receivingLocation: e.target.value })} /></Field>
+          <Field label="Abgebende Person / Stelle"><Input className={inputCls} value={intake.fromName} onChange={(e) => setIntake({ ...intake, fromName: e.target.value })} /></Field>
+          <Field label="Kontakt der abgebenden Stelle"><Input className={inputCls} value={intake.fromContact} onChange={(e) => setIntake({ ...intake, fromContact: e.target.value })} /></Field>
+          <Field label="Anlass / Angaben zur Übergabe"><Textarea className={textareaCls} value={intake.circumstances} onChange={(e) => setIntake({ ...intake, circumstances: e.target.value })} /></Field>
+          <Field label="Mitgegebene Dokumente / offene Nachweise"><Textarea className={textareaCls} value={intake.accompanyingDocuments} onChange={(e) => setIntake({ ...intake, accompanyingDocuments: e.target.value })} /></Field>
+        </div>}
+        <datalist id="document-legal-basis"><option value="§ 16a TierSchG" /><option value="§ 47 BNatSchG" /></datalist>
         {/* SEIZURE */}
         {active === "seizure" && (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Datum / Uhrzeit">
-              <Input
+              <Input type="datetime-local"
                 value={seizure.occurredAt}
                 onChange={(e) => setSeizure({ ...seizure, occurredAt: e.target.value })}
                 className={inputCls}
@@ -388,6 +460,8 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
             </Field>
             <Field label="Rechtsgrundlage">
               <Input
+                list="document-legal-basis"
+                placeholder="Aus Anordnung / Bescheid übernehmen"
                 value={seizure.legalBasis}
                 onChange={(e) => setSeizure({ ...seizure, legalBasis: e.target.value })}
                 className={inputCls}
@@ -451,25 +525,7 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
                 />
               </Field>
             </div>
-            <div className="md:col-span-2 flex justify-end pt-2">
-              <Button
-                onClick={() =>
-                  wrap(
-                    () =>
-                      exportSeizureProtocol({
-                        caseRecord,
-                        sentinel,
-                        ...seizure,
-                      }),
-                    "Sicherstellungsprotokoll",
-                  )
-                }
-                disabled={busy || !seizure.location.trim() || !seizure.circumstances.trim()}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Erstellen (PDF + JSON)
-              </Button>
-            </div>
+
           </div>
         )}
 
@@ -477,7 +533,7 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
         {active === "found" && (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Datum / Uhrzeit Fund">
-              <Input
+              <Input type="datetime-local"
                 value={found.foundAt}
                 onChange={(e) => setFound({ ...found, foundAt: e.target.value })}
                 className={inputCls}
@@ -536,6 +592,7 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
                 />
               </Field>
             </div>
+            <Field label="Verwahrungsstelle"><Input value={found.custodyLocation} onChange={(e) => setFound({ ...found, custodyLocation: e.target.value })} className={inputCls} /></Field>
             <Field label="Gemeldet an (Behörde)">
               <Input
                 value={found.reportedAuthority}
@@ -546,31 +603,13 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
               />
             </Field>
             <Field label="Gemeldet am">
-              <Input
+              <Input type="datetime-local"
                 value={found.reportedAt}
                 onChange={(e) => setFound({ ...found, reportedAt: e.target.value })}
                 className={inputCls}
               />
             </Field>
-            <div className="md:col-span-2 flex justify-end pt-2">
-              <Button
-                onClick={() =>
-                  wrap(
-                    () => exportFoundAnimalReport({ caseRecord, sentinel, ...found }),
-                    "Fundtier-Meldung",
-                  )
-                }
-                disabled={
-                  busy ||
-                  !found.foundLocation.trim() ||
-                  !found.finderName.trim() ||
-                  !found.circumstances.trim()
-                }
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Erstellen (PDF + JSON)
-              </Button>
-            </div>
+
           </div>
         )}
 
@@ -653,8 +692,8 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
               </Field>
             </div>
 
-            <div className="flex items-center gap-3 pt-2">
-              <Checkbox
+            <div data-document-field="Sachkundenachweis bestätigt" className="flex items-center gap-3 pt-2">
+              <Checkbox aria-label="Sachkundenachweis bestätigt"
                 checked={adoption.hasSachkunde}
                 onCheckedChange={(v) =>
                   setAdoption({ ...adoption, hasSachkunde: Boolean(v) })
@@ -673,15 +712,15 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
               />
             </Field>
 
-            <div className="flex items-center gap-3 pt-2">
-              <Checkbox
+            <div data-document-field="Behördliche Freigabe bestätigt" className="flex items-center gap-3 pt-2">
+              <Checkbox aria-label="Behördliche Freigabe bestätigt"
                 checked={adoption.hasPermitIfRequired}
                 onCheckedChange={(v) =>
                   setAdoption({ ...adoption, hasPermitIfRequired: Boolean(v) })
                 }
               />
               <span className="font-mono text-[11px]">
-                Behördl. Genehmigung vorgelegt {requiresPermitForCase(caseRecord) ? "(PFLICHT)" : "(falls erforderlich)"}
+                Behördliche Klärung / Freigabe dokumentiert {requiresPermitForCase(caseRecord) ? "(für diese Vorlage verpflichtend)" : "(falls erforderlich)"}
               </span>
             </div>
             <Field label="Genehmigungs-Referenz">
@@ -711,7 +750,7 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
               />
             </Field>
             <Field label="Übergabedatum">
-              <Input
+              <Input type="date"
                 value={adoption.handoverDate}
                 onChange={(e) =>
                   setAdoption({ ...adoption, handoverDate: e.target.value })
@@ -731,35 +770,19 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
               </Field>
             </div>
 
-            <AttachmentsField value={adoptionFiles} onChange={setAdoptionFiles} />
+            <AttachmentsField value={adoptionFiles} onChange={(files) => { setAdoptionFiles(files); setDirtyDocs((previous) => ({ ...previous, adoption: true })); }} />
 
-            <div className="md:col-span-2 flex justify-end pt-2">
-              <Button
-                onClick={() =>
-                  wrap(
-                    () =>
-                      exportAdoptionContract({
-                        caseRecord,
-                        sentinel,
-                        ...adoption,
-                        attachmentFiles: adoptionFiles,
-                      }),
-                    "Adoptionsvertrag",
-                  )
-                }
-                disabled={busy || !adoption.adopterName.trim()}
-                title={!eligibility.ok ? "Vertrag wird mit Hinweis 'unvollständig' erstellt" : ""}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Erstellen (PDF + JSON{adoptionFiles.length ? ` + ${adoptionFiles.length} Anhang` : ""})
-              </Button>
-            </div>
+
           </div>
         )}
 
         {/* CITES */}
         {active === "cites" && (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Field label="Stand der Herkunftsnachweise"><select className={inputCls + " w-full"} value={cites.certificateStatus} onChange={(e) => setCites({ ...cites, certificateStatus: e.target.value })}>
+              <option value="unknown">Noch ungeklärt</option><option value="available">Bescheinigung liegt vor</option><option value="missing">Bescheinigung fehlt / Anwendbarkeit zu prüfen</option>
+            </select></Field>
+            {cites.certificateStatus !== "available" && <Field label="Fehlende Nachweise / weiterer Klärungsbedarf"><Textarea className={textareaCls} value={cites.missingEvidence} onChange={(e) => setCites({ ...cites, missingEvidence: e.target.value })} placeholder="Was fehlt und wer klärt es?" /></Field>}
             <Field label="CITES-Bescheinigung Nr.">
               <Input
                 value={cites.citesCertificateNo}
@@ -779,7 +802,7 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
               />
             </Field>
             <Field label="Ausgestellt am">
-              <Input
+              <Input type="date"
                 value={cites.issuedAt}
                 onChange={(e) => setCites({ ...cites, issuedAt: e.target.value })}
                 className={inputCls}
@@ -796,11 +819,7 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
               />
             </Field>
             <Field label="Marker-Typ">
-              <Input
-                value={cites.markerType}
-                onChange={(e) => setCites({ ...cites, markerType: e.target.value })}
-                className={inputCls}
-              />
+              <select value={cites.markerType} onChange={(e) => setCites({ ...cites, markerType: e.target.value })} className={inputCls + " w-full"}>{["Noch ungeklärt / keine Kennzeichnung dokumentiert", "Transponder (ISO 11784/85)", "Geschlossener Ring", "Fotodokumentation", "Andere Kennzeichnung"].map((type) => <option key={type}>{type}</option>)}</select>
             </Field>
             <Field label="Marker-ID">
               <Input
@@ -820,7 +839,7 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
                 />
               </Field>
             </div>
-            <Field label="Empfangende Behörde">
+            <Field label="Empfangende Behörde / Stelle">
               <Input
                 value={cites.receivingAuthority}
                 onChange={(e) =>
@@ -848,7 +867,7 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
               />
             </Field>
             <Field label="Datum / Uhrzeit Übergabe">
-              <Input
+              <Input type="datetime-local"
                 value={cites.handoverAt}
                 onChange={(e) => setCites({ ...cites, handoverAt: e.target.value })}
                 className={inputCls}
@@ -864,36 +883,17 @@ export const DocumentsHub = ({ caseRecord, sentinel }: Props) => {
               </Field>
             </div>
 
-            <AttachmentsField value={citesFiles} onChange={setCitesFiles} />
+            <AttachmentsField value={citesFiles} onChange={(files) => { setCitesFiles(files); setDirtyDocs((previous) => ({ ...previous, cites: true })); }} />
 
-            <div className="md:col-span-2 flex justify-end pt-2">
-              <Button
-                onClick={() =>
-                  wrap(
-                    () =>
-                      exportCitesHandover({
-                        caseRecord,
-                        sentinel,
-                        ...cites,
-                        attachmentFiles: citesFiles,
-                      }),
-                    "CITES-Übergabeprotokoll",
-                  )
-                }
-                disabled={
-                  busy ||
-                  !cites.citesCertificateNo.trim() ||
-                  !cites.markerId.trim() ||
-                  !cites.receivingOfficer.trim()
-                }
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Erstellen (PDF + JSON{citesFiles.length ? ` + ${citesFiles.length} Anhang` : ""})
-              </Button>
-            </div>
+
           </div>
         )}
-      </div>
+        <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-border pt-5">
+          <Button type="button" variant="outline" disabled={busy} onClick={() => void exportCurrent(true)}>Entwurf herunterladen</Button>
+          <Button type="submit" disabled={busy}><Download className="mr-2 h-4 w-4" />{busy ? "Wird erstellt …" : "Dokument erstellen (PDF + JSON)"}</Button>
+        </div>
+      </form>
+      </RequiredFields.Provider>
     </div>
   );
 };

@@ -1,5 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { WardDocumentsDialog } from "@/components/wards/WardDocumentsDialog";
+import { INTAKE_TYPES, intakeType, protectionStatus, documentPlan, type IntakeType } from "@/lib/animal-workflow";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { useAccentTheme } from "@/hooks/useAccentTheme";
+import { AppFeedback } from "@/components/AppFeedback";
+import { SentinelPicker } from "@/components/SentinelPicker";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { useAuth } from "@/hooks/auth-context";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -10,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { sniffImage, sniffDocument } from "@/lib/uploads";
+import { sniffImage, sniffDocument, uploadId } from "@/lib/uploads";
 import { SpeciesInput } from "@/components/SpeciesInput";
 import { LoadingSnake } from "@/components/ui/loading-snake";
 import { ShieldCheck, Lock, AlertTriangle, Plus, X, ImagePlus, Truck, FileCheck2, Pencil, Search } from "lucide-react";
@@ -27,6 +33,7 @@ type Ward = {
   age_estimate: string | null;
   size_estimate: string | null;
   origin_context: string | null;
+  intake_type: IntakeType;
   background: string;
   care_requirements: string;
   space_requirements: string;
@@ -63,6 +70,7 @@ type FormState = {
   region: string;
   urgency: string;
   origin_context: string;
+  intake_type: IntakeType;
   background: string;
   care_requirements: string;
   space_requirements: string;
@@ -84,6 +92,7 @@ const emptyForm: FormState = {
   region: "",
   urgency: "standard",
   origin_context: "",
+  intake_type: "unknown",
   background: "",
   care_requirements: "",
   space_requirements: "",
@@ -148,7 +157,9 @@ type TransportLog = {
 };
 
 const Wards = () => {
-  const { user, isAdmin, isEinrichtung, loading: authLoading } = useAuth();
+  const location = useLocation();
+  const { user, isAdmin, isBehoerde, isEinrichtung: isShelterRole, canBrowseSentinels, role, region, loading: authLoading } = useAuth();
+  const isEinrichtung = isShelterRole || (role === "sentinel" && canBrowseSentinels);
   const supabase = useExternalSupabase();
   const storage = supabase.storage;
   const { toast } = useToast();
@@ -157,6 +168,10 @@ const Wards = () => {
   const [wards, setWards] = useState<Ward[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editTarget, setEditTarget] = useState<Ward | null>(null);
+  const [documentWard, setDocumentWard] = useState<Ward | null>(null);
+  const documentTrigger = useRef<HTMLElement | null>(null);
+  const deepLinkHandled = useRef<string | null>(null);
+  const openDocuments = (ward: Ward) => { documentTrigger.current = document.activeElement as HTMLElement; setDetailOpen(null); setDocumentWard(ward); };
   const [submitting, setSubmitting] = useState(false);
   const [interestOpen, setInterestOpen] = useState<string | null>(null);
   const [interestMessage, setInterestMessage] = useState("");
@@ -166,10 +181,19 @@ const Wards = () => {
   const [interestStatus, setInterestStatus] = useState<Record<string, string>>({});
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<"all" | "endstelle" | "pflegestelle" | "qsafe">("all");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search")?.slice(0, 120) ?? "");
   const [page, setPage] = useState(0);
+  const [query, setQuery] = useState(search);
+  useEffect(() => { setSearch(new URLSearchParams(location.search).get("search")?.slice(0, 120) ?? ""); }, [location.search]);
+  const wardsAbort = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
   const [hasMore, setHasMore] = useState(false);
   const [wardsLoading, setWardsLoading] = useState(false);
+  const [wardsError, setWardsError] = useState(false);
+  const [interestBusy, setInterestBusy] = useState(false);
   const [transports, setTransports] = useState<Record<string, TransportLog[]>>({});
 
   const PAGE_SIZE = 50;
@@ -222,7 +246,7 @@ const Wards = () => {
       setAccess({ kind: "anon" });
       return;
     }
-    if (isAdmin || isEinrichtung) { setAccess({ kind: "approved" }); return; }
+    if (isAdmin || isEinrichtung || isBehoerde) { setAccess({ kind: "approved" }); return; }
     let cancelled = false;
     supabase
       .from("sentinel_applications")
@@ -240,19 +264,24 @@ const Wards = () => {
         return setAccess({ kind: "pending" });
       });
     return () => { cancelled = true; };
-  }, [user, isAdmin, isEinrichtung, authLoading, supabase]);
+  }, [user, isAdmin, isEinrichtung, isBehoerde, authLoading, supabase]);
 
   useEffect(() => {
     if (access.kind !== "approved" || !user) return;
-    void loadWards();
+    void loadWards(true);
     void loadMyInterests();
+    return () => wardsAbort.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [access.kind, user?.id]);
+  }, [access.kind, user?.id, filter, query]);
 
   // Sign URLs whenever ward image paths change — only the paths the grid
   // actually renders (cover + 4 thumbs per ward), not entire galleries.
   useEffect(() => {
-    const allPaths = Array.from(new Set(wards.flatMap((w) => (w.images ?? []).slice(0, 5))));
+    const allPaths = Array.from(new Set([
+      ...wards.flatMap((w) => (w.images ?? []).slice(0, 5)),
+      // The edit form shows the full gallery, not just the cover+4 grid thumbs.
+      ...(editTarget?.images ?? []),
+    ]));
     const missing = allPaths.filter((p) => !signedUrls[p]);
     if (missing.length === 0) return;
     void (async () => {
@@ -264,20 +293,29 @@ const Wards = () => {
       data.forEach((d, i) => {
         if (d.signedUrl) next[missing[i]] = d.signedUrl;
       });
-      setSignedUrls((prev) => ({ ...prev, ...next }));
+      if (Object.keys(next).length) setSignedUrls((prev) => ({ ...prev, ...next }));
     })();
-  }, [wards, signedUrls, storage]);
+  }, [wards, editTarget, signedUrls, storage]);
 
   const loadWards = async (reset = false) => {
-    setWardsLoading(true);
+    if (reset) wardsAbort.current?.abort();
+    const controller = new AbortController();
+    wardsAbort.current = controller;
+    setWardsLoading(true); setWardsError(false);
     try {
       const from = reset ? 0 : page * PAGE_SIZE;
-      const { data, error } = await supabase
-        .from("ward_listings")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .range(from, from + PAGE_SIZE - 1);
+      let request = supabase.from("ward_listings").select("*")
+        .order("created_at", { ascending: false }).order("id", { ascending: false });
+      if (filter === "qsafe") request = request.eq("quarantine_status", "quarantine_safe");
+      else if (filter !== "all") request = request.eq("placement_type", filter);
+      if (query) {
+        const term = query.slice(0, 120).replace(/["\\]/g, " ");
+        request = request.or(["common_name", "case_code", "scientific_name", "region"].map((field) => `${field}.ilike."%${term}%"`).join(","));
+      }
+      const { data, error } = await request.range(from, from + PAGE_SIZE - 1).abortSignal(controller.signal);
+      if (controller.signal.aborted) return;
       if (error) {
+        setWardsError(true);
         toast({ title: "Fehler beim Laden", description: error.message, variant: "destructive" });
         return;
       }
@@ -295,14 +333,15 @@ const Wards = () => {
         .from("transport_logs")
         .select("*")
         .in("ward_id", ids)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false }).abortSignal(controller.signal);
+      if (controller.signal.aborted) return;
       const map: Record<string, TransportLog[]> = {};
       (tData ?? []).forEach((t) => {
         (map[t.ward_id] ??= []).push(t as unknown as TransportLog);
       });
       setTransports(reset ? map : (prev) => ({ ...prev, ...map }));
     } finally {
-      setWardsLoading(false);
+      if (!controller.signal.aborted) setWardsLoading(false);
     }
   };
 
@@ -325,6 +364,7 @@ const Wards = () => {
     values: FormState,
     keptImages: string[],
     newFiles: File[],
+    withDocuments = false,
   ) => {
     if (!user) return;
     setSubmitting(true);
@@ -346,7 +386,7 @@ const Wards = () => {
         toast({ title: "Ungültiges Bild", description: `${file.name}: nur JPG/PNG/WebP/GIF/AVIF bis 10 MB.`, variant: "destructive" });
         return;
       }
-      const path = `${user.id}/${crypto.randomUUID()}.${img.ext}`;
+      const path = `${user.id}/${uploadId()}.${img.ext}`;
       const { error: upErr } = await supabase.storage
         .from("ward-images")
         .upload(path, file, { contentType: img.mime, upsert: false });
@@ -361,7 +401,7 @@ const Wards = () => {
 
     const payload = {
       // Staff (admin/shelter/gov) may assign the ward to an approved sentinel
-      // via User-ID; default is keeping it with the creator (shelter stock).
+      // via the approved-sentinel picker; default is keeping the current owner.
       owner_id: values.assign_to.trim() || (editTarget ? editTarget.owner_id : user.id),
       shelter_id: editTarget ? editTarget.shelter_id : (isEinrichtung ? myShelterId : null),
       case_code: values.case_code.trim(),
@@ -372,10 +412,11 @@ const Wards = () => {
       age_estimate: values.age_estimate.trim() || null,
       size_estimate: values.size_estimate.trim() || null,
       origin_context: values.origin_context.trim() || null,
+      intake_type: values.intake_type,
       background: values.background.trim(),
       care_requirements: values.care_requirements.trim(),
       space_requirements: values.space_requirements.trim(),
-      region: values.region.trim() || null,
+      region: isBehoerde ? region : values.region.trim() || null,
       urgency: values.urgency || "standard",
       placement_type: values.placement_type,
       legal_custody: values.legal_custody,
@@ -383,9 +424,9 @@ const Wards = () => {
       quarantine_until: values.quarantine_until ? new Date(values.quarantine_until).toISOString() : null,
       images: [...keptImages, ...uploadedPaths],
     };
-    const { error } = editTarget
-      ? await supabase.from("ward_listings").update(payload).eq("id", editTarget.id)
-      : await supabase.from("ward_listings").insert(payload);
+    const { data: savedWard, error } = editTarget
+      ? await supabase.from("ward_listings").update(payload).eq("id", editTarget.id).select("*").single()
+      : await supabase.from("ward_listings").insert(payload).select("*").single();
     setSubmitting(false);
     if (error) {
       // Remove orphaned uploads so a failed insert doesn't leak storage.
@@ -393,7 +434,8 @@ const Wards = () => {
       toast({ title: "Konnte nicht speichern", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: editTarget ? "Ward aktualisiert" : "Ward eingestellt", description: "Sichtbar nur für vetted Stewards." });
+    toast({ title: editTarget ? "Tier aktualisiert" : "Tier aufgenommen", description: "Tierdaten und Aufnahmegrund gespeichert." });
+    if (withDocuments && savedWard) openDocuments(savedWard as Ward);
     setShowForm(false);
     setEditTarget(null);
     if (removedImages.length > 0) {
@@ -403,13 +445,15 @@ const Wards = () => {
   };
 
   const submitInterest = async (wardId: string) => {
-    if (!user || !interestMessage.trim()) return;
+    if (!user || !interestMessage.trim() || interestBusy) return;
+    setInterestBusy(true);
     const { error } = await supabase.from("ward_interest").insert({
       ward_id: wardId,
       applicant_id: user.id,
       message: interestMessage.trim(),
       consultation_requested: interestConsult,
     });
+    setInterestBusy(false);
     if (error) {
       toast({ title: "Bekundung fehlgeschlagen", description: error.message, variant: "destructive" });
       return;
@@ -425,7 +469,7 @@ const Wards = () => {
   // trigger on ward_listings writes the audit entry automatically.
   const setWardStatus = async (id: string, status: Ward["status"]) => {
     if (status === "withdrawn" && !window.confirm("Ward wirklich zurückziehen? Der Vorgang wird protokolliert.")) return;
-    const { error } = await supabase.from("ward_listings").update({ status }).eq("id", id);
+    const { error } = await supabase.from("ward_listings").update({ status }).eq("id", id).select("id").single();
     if (error) {
       toast({ title: "Status fehlgeschlagen", description: error.message, variant: "destructive" });
       return;
@@ -446,7 +490,7 @@ const Wards = () => {
       if (e.labFile) {
         const sniffed = await sniffDocument(e.labFile);
         if (!sniffed) throw new Error("Nur PDF/JPG/PNG/WebP/GIF/AVIF bis 10 MB.");
-        const path = `${user.id}/${wardId}/${crypto.randomUUID()}.${sniffed.ext}`;
+        const path = `${user.id}/${wardId}/${uploadId()}.${sniffed.ext}`;
         const { error: upErr } = await storage
           .from("lab-docs")
           .upload(path, e.labFile, { contentType: sniffed.mime, upsert: false });
@@ -457,7 +501,7 @@ const Wards = () => {
         quarantine_status: e.status,
         quarantine_until: quarantineUntil,
         ...(labReportPath ? { lab_report_path: labReportPath } : {}),
-      }).eq("id", wardId);
+      }).eq("id", wardId).select("id").single();
       if (error) throw error;
       toast({ title: "Quarantäne-Status gespeichert" });
       setWards((prev) => prev.map((w) => (w.id === wardId
@@ -511,6 +555,21 @@ const Wards = () => {
       }));
     }
   };
+
+  const managedWardIds = useMemo(() => new Set(wards.filter((w) => isAdmin || w.owner_id === user?.id || (isEinrichtung && Boolean(myShelterId) && w.shelter_id === myShelterId) || (isBehoerde && Boolean(region) && w.region === region)).map((w) => w.id)), [wards, isAdmin, user?.id, isEinrichtung, myShelterId, isBehoerde, region]);
+  useEffect(() => {
+    if (deepLinkHandled.current === location.search || access.kind !== "approved") return;
+    const params = new URLSearchParams(location.search);
+    if (params.get("new") === "1" && (isAdmin || isEinrichtung || isBehoerde)) {
+      deepLinkHandled.current = location.search; setEditTarget(null); setShowForm(true);
+    } else if (params.get("edit")) {
+      const ward = wards.find((item) => item.id === params.get("edit"));
+      if (ward && managedWardIds.has(ward.id)) { deepLinkHandled.current = location.search; setEditTarget(ward); setDocumentWard(null); setShowForm(true); }
+    } else if (params.get("documents")) {
+      const ward = wards.find((item) => item.id === params.get("documents"));
+      if (ward && managedWardIds.has(ward.id)) { deepLinkHandled.current = location.search; setDocumentWard(ward); }
+    }
+  }, [location.search, access.kind, wards, managedWardIds, isAdmin, isEinrichtung, isBehoerde]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -586,13 +645,17 @@ const Wards = () => {
             />
           )}
 
+          {wardsError && <AppFeedback title="Tiere konnten nicht geladen werden" message="Bitte versuche es erneut. Deine gespeicherten Daten bleiben erhalten." onRetry={() => void loadWards(true)} />}
           {access.kind === "approved" && (
             <ApprovedView
               wards={wards}
               myWards={myWards}
               currentUserId={user!.id}
               isAdmin={isAdmin}
-              canCreate={isAdmin || isEinrichtung}
+              canCreate={isAdmin || isEinrichtung || isBehoerde}
+              canAssignToSentinel={isAdmin || (isEinrichtung && !isBehoerde)}
+              managedWardIds={managedWardIds}
+              openDocuments={openDocuments}
               myInterests={myInterests}
               interestStatus={interestStatus}
               showForm={showForm}
@@ -603,6 +666,7 @@ const Wards = () => {
               submitting={submitting}
               saveWard={saveWard}
               signedUrls={signedUrls}
+              interestBusy={interestBusy}
               interestOpen={interestOpen}
               setInterestOpen={setInterestOpen}
               interestMessage={interestMessage}
@@ -636,6 +700,7 @@ const Wards = () => {
         </div>
       </main>
       <SiteFooter />
+      {documentWard && <WardDocumentsDialog ward={documentWard} onClose={() => setDocumentWard(null)} returnFocus={documentTrigger.current} />}
     </div>
   );
 };
@@ -673,6 +738,7 @@ type ApprovedViewProps = {
   currentUserId: string;
   isAdmin: boolean;
   canCreate: boolean;
+  canAssignToSentinel: boolean;
   myInterests: Set<string>;
   interestStatus: Record<string, string>;
   showForm: boolean;
@@ -681,8 +747,11 @@ type ApprovedViewProps = {
   openEdit: (w: Ward) => void;
   closeForm: () => void;
   submitting: boolean;
-  saveWard: (values: FormState, keptImages: string[], newFiles: File[]) => Promise<void>;
+  saveWard: (values: FormState, keptImages: string[], newFiles: File[], withDocuments?: boolean) => Promise<void>;
   signedUrls: Record<string, string>;
+  managedWardIds: Set<string>;
+  openDocuments: (ward: Ward) => void;
+  interestBusy: boolean;
   interestOpen: string | null;
   setInterestOpen: (v: string | null) => void;
   interestMessage: string;
@@ -714,35 +783,23 @@ type ApprovedViewProps = {
 };
 
 const ApprovedView = ({
-  wards, myWards, currentUserId, isAdmin, canCreate, myInterests, interestStatus,
+  wards, myWards, currentUserId, isAdmin, canCreate, canAssignToSentinel, myInterests, interestStatus,
   showForm, editTarget, openCreate, openEdit, closeForm, submitting, saveWard, signedUrls,
-  interestOpen, setInterestOpen, interestMessage, setInterestMessage, interestConsult, setInterestConsult, detailOpen, setDetailOpen, submitInterest, setWardStatus,
+  managedWardIds, openDocuments, interestBusy, interestOpen, setInterestOpen, interestMessage, setInterestMessage, interestConsult, setInterestConsult, detailOpen, setDetailOpen, submitInterest, setWardStatus,
   filter, setFilter, search, setSearch, wardsLoading, hasMore, loadMore,
   qEdit, setQEdit, qBusy, saveQuarantine,
   transports, tOpen, setTOpen, tForm, setTForm, tBusy, addTransport,
 }: ApprovedViewProps) => {
-  const q = search.trim().toLowerCase();
-  const visibleWards = wards.filter((w) =>
-    (filter === "all" ? true
-      : filter === "qsafe" ? w.quarantine_status === "quarantine_safe"
-      : w.placement_type === filter) &&
-    (!q || w.common_name.toLowerCase().includes(q) || (w.case_code ?? "").toLowerCase().includes(q) ||
-      (w.scientific_name ?? "").toLowerCase().includes(q) || (w.region ?? "").toLowerCase().includes(q)),
-  );
-
+  const { accent } = useAccentTheme();
+  const detailTrigger = useRef<HTMLElement | null>(null);
+  const visibleWards = wards;
   useEffect(() => {
-    if (!detailOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setDetailOpen(null);
-    };
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [detailOpen, setDetailOpen]);
+    if (!showForm) return;
+    const form = document.getElementById("ward-editor");
+    form?.scrollIntoView({ block: "start" });
+    form?.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
+  }, [showForm, editTarget?.id]);
+
 
   return (
     <>
@@ -756,17 +813,18 @@ const ApprovedView = ({
           </p>
         </div>
         {canCreate && (
-          <Button onClick={() => (showForm ? closeForm() : openCreate())} variant={showForm ? "outline" : "default"}>
+          <Button disabled={submitting} onClick={() => (showForm ? closeForm() : openCreate())} variant={showForm ? "outline" : "default"}>
             <Plus className="mr-1 h-4 w-4" />
             {showForm ? "Abbrechen" : "Ward einstellen"}
           </Button>
         )}
       </div>
 
-      {canCreate && showForm && (
+      {showForm && (canCreate || (editTarget && managedWardIds.has(editTarget.id))) && (
         <WardForm
           key={editTarget?.id ?? "new"}
           ward={editTarget}
+          canAssign={canAssignToSentinel}
           myWards={myWards}
           submitting={submitting}
           signedUrls={signedUrls}
@@ -822,6 +880,7 @@ const ApprovedView = ({
         )}
         {visibleWards.map((w) => {
           const owned = w.owner_id === currentUserId;
+          const managed = managedWardIds.has(w.id);
           const expressed = myInterests.has(w.id);
           const cover = (w.images ?? [])[0];
           return (
@@ -829,11 +888,12 @@ const ApprovedView = ({
               <div
                 role="button"
                 tabIndex={0}
-                onClick={() => setDetailOpen(w.id)}
+                onClick={(e) => { detailTrigger.current = e.currentTarget; setDetailOpen(w.id); }}
                 onKeyDown={(e) => {
                   if (e.target !== e.currentTarget) return;
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
+                    detailTrigger.current = e.currentTarget;
                     setDetailOpen(w.id);
                   }
                 }}
@@ -876,7 +936,7 @@ const ApprovedView = ({
                   </div>
                   <div className="flex w-full shrink-0 flex-row items-center justify-between gap-2 sm:w-auto sm:flex-col sm:items-end">
                     <Badge className={urgencyTone[w.urgency] ?? urgencyTone.standard}>{urgencyLabel[w.urgency] ?? w.urgency}</Badge>
-                    {(owned || isAdmin) && (
+                    {managed && (
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); openEdit(w); }}
@@ -914,20 +974,14 @@ const ApprovedView = ({
               </div>
 
               {detailOpen === w.id && (
-                <div
-                  className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 md:p-8"
-                  role="dialog"
-                  aria-modal="true"
-                  aria-labelledby={`ward-detail-${w.id}`}
-                  onClick={() => setDetailOpen(null)}
-                >
-                  <div className="w-full max-w-3xl border border-border bg-background" onClick={(e) => e.stopPropagation()}>
+                <Dialog open onOpenChange={(open) => { if (!open) setDetailOpen(null); }}>
+                  <DialogContent onCloseAutoFocus={(e) => { e.preventDefault(); detailTrigger.current?.focus(); }} data-acc={accent} data-app-v2 aria-describedby={undefined} className="v2scope max-h-[90dvh] w-[calc(100%-2rem)] max-w-3xl overflow-y-auto rounded-none border-border p-0">
                     <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
                       <div>
                         <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
                           {w.case_code} · {statusLabel[w.status]}
                         </p>
-                        <h3 id={`ward-detail-${w.id}`} className="font-display mt-1 text-2xl leading-tight">{w.common_name}</h3>
+                        <DialogTitle className="font-display mt-1 text-2xl leading-tight">{w.common_name}</DialogTitle>
                         {w.scientific_name && (
                           <p className="mt-1 text-xs italic text-muted-foreground">
                             {w.scientific_name}
@@ -939,16 +993,9 @@ const ApprovedView = ({
                           </p>
                         )}
                       </div>
-                      <div className="flex shrink-0 flex-col items-end gap-2">
+                      <div className="mr-8 flex shrink-0 flex-col items-end gap-2">
                         <Badge className={urgencyTone[w.urgency] ?? urgencyTone.standard}>{urgencyLabel[w.urgency] ?? w.urgency}</Badge>
-                        <button
-                          type="button"
-                          onClick={() => setDetailOpen(null)}
-                          className="flex h-8 w-8 items-center justify-center border border-border text-muted-foreground hover:border-primary hover:text-primary"
-                          aria-label="Schließen"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
+
                       </div>
                     </div>
                     <div className="max-h-[72vh] overflow-y-auto p-6">
@@ -970,7 +1017,7 @@ const ApprovedView = ({
                       <Section label="Pflege" body={w.care_requirements} />
                       <Section label="Platz" body={w.space_requirements} />
 
-              {(owned || isAdmin) && (
+              {managed && (
                 <div className="mt-6 border border-border bg-surface p-4">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
                     Quarantäne &amp; Laborbefund
@@ -1051,15 +1098,15 @@ const ApprovedView = ({
                     ))}
                   </ul>
                 )}
-                {(owned || isAdmin) && (
+                {managed && (
                   <div className="mt-3">
                     {tOpen === w.id ? (
                       <div className="grid gap-2">
                         <div className="grid grid-cols-2 gap-2">
-                          <Input placeholder="Von (Ort)" value={tForm.from} onChange={(e) => setTForm((p) => ({ ...p, from: e.target.value }))} className="h-8 text-xs" />
-                          <Input placeholder="Nach (Ort)" value={tForm.to} onChange={(e) => setTForm((p) => ({ ...p, to: e.target.value }))} className="h-8 text-xs" />
-                          <Input placeholder="Transportart (z. B. zert. Kurier)" value={tForm.mode} onChange={(e) => setTForm((p) => ({ ...p, mode: e.target.value }))} className="h-8 text-xs" />
-                          <Input placeholder="Ausführender / Firma" value={tForm.carrier} onChange={(e) => setTForm((p) => ({ ...p, carrier: e.target.value }))} className="h-8 text-xs" />
+                          <Input aria-label="Von (Ort)" placeholder="Von (Ort)" value={tForm.from} onChange={(e) => setTForm((p) => ({ ...p, from: e.target.value }))} className="h-8 text-xs" />
+                          <Input aria-label="Nach (Ort)" placeholder="Nach (Ort)" value={tForm.to} onChange={(e) => setTForm((p) => ({ ...p, to: e.target.value }))} className="h-8 text-xs" />
+                          <Input aria-label="Transportart" placeholder="Transportart (z. B. zert. Kurier)" value={tForm.mode} onChange={(e) => setTForm((p) => ({ ...p, mode: e.target.value }))} className="h-8 text-xs" />
+                          <Input aria-label="Ausführender oder Firma" placeholder="Ausführender / Firma" value={tForm.carrier} onChange={(e) => setTForm((p) => ({ ...p, carrier: e.target.value }))} className="h-8 text-xs" />
                         </div>
                         <div className="flex flex-wrap gap-3">
                           {TRANSPORT_CHECKLIST.map((c) => (
@@ -1077,7 +1124,7 @@ const ApprovedView = ({
                             </label>
                           ))}
                         </div>
-                        <Input placeholder="Notizen (Temp, Dokumente …)" value={tForm.notes} onChange={(e) => setTForm((p) => ({ ...p, notes: e.target.value }))} className="h-8 text-xs" />
+                        <Input aria-label="Transportnotizen" placeholder="Notizen (Temp, Dokumente …)" value={tForm.notes} onChange={(e) => setTForm((p) => ({ ...p, notes: e.target.value }))} className="h-8 text-xs" />
                         <div className="flex gap-2">
                           <Button size="sm" disabled={tBusy === w.id || !tForm.from || !tForm.to} onClick={() => addTransport(w.id)}>
                             {tBusy === w.id ? "Speichere …" : "Transport dokumentieren"}
@@ -1097,14 +1144,15 @@ const ApprovedView = ({
               </div>
 
                     </div>
-                  </div>
-                </div>
+                  </DialogContent>
+                </Dialog>
               )}
 
               <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-5">
-                {owned || isAdmin ? (
+                {managed && <Button type="button" variant="outline" size="sm" onClick={() => openDocuments(w)}><FileCheck2 className="mr-2 h-4 w-4" />Dokumente vorbereiten</Button>}
+                {managed ? (
                   <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-                    {owned ? "Du betreust diesen Ward ·" : "Admin ·"} Outcome
+                    {owned ? "Du betreust diesen Ward ·" : "Verwaltung ·"} Outcome
                     <select
                       value={w.status}
                       onChange={(e) => setWardStatus(w.id, e.target.value as Ward["status"])}
@@ -1142,7 +1190,7 @@ const ApprovedView = ({
                         <span>Ich wünsche einen Termin für ein Beratungsgespräch.</span>
                       </label>
                       <div className="mt-3 flex gap-2">
-                        <Button size="sm" disabled={!interestMessage.trim()} onClick={() => submitInterest(w.id)}>Bekundung senden</Button>
+                        <Button size="sm" disabled={interestBusy || !interestMessage.trim()} onClick={() => submitInterest(w.id)}>Bekundung senden</Button>
                         <Button size="sm" variant="ghost" onClick={() => { setInterestOpen(null); setInterestMessage(""); setInterestConsult(false); }}>
                           Abbrechen
                         </Button>
@@ -1182,15 +1230,18 @@ const ApprovedView = ({
 // never re-renders the wards grid (previously every keystroke re-rendered
 // all cards, regenerating the visible filter + signing effects).
 const WardForm = ({
-  ward, myWards, submitting, signedUrls, onSubmit, onCancel,
+  ward, canAssign, myWards, submitting, signedUrls, onSubmit, onCancel,
 }: {
   ward: Ward | null;
+  canAssign: boolean;
   myWards: Ward[];
   submitting: boolean;
   signedUrls: Record<string, string>;
-  onSubmit: (values: FormState, keptImages: string[], newFiles: File[]) => Promise<void>;
+  onSubmit: (values: FormState, keptImages: string[], newFiles: File[], withDocuments?: boolean) => Promise<void>;
   onCancel: () => void;
 }) => {
+  const { isBehoerde, region } = useAuth();
+  const [speciesBusy, setSpeciesBusy] = useState(false);
   const [form, setForm] = useState<FormState>(
     ward ? {
       case_code: ward.case_code,
@@ -1203,6 +1254,7 @@ const WardForm = ({
       region: ward.region ?? "",
       urgency: ward.urgency,
       origin_context: ward.origin_context ?? "",
+      intake_type: intakeType(ward.intake_type),
       background: ward.background,
       care_requirements: ward.care_requirements,
       space_requirements: ward.space_requirements,
@@ -1242,6 +1294,7 @@ const WardForm = ({
       region: w.region ?? "",
       urgency: w.urgency,
       origin_context: w.origin_context ?? "",
+      intake_type: intakeType(w.intake_type),
       background: w.background,
       care_requirements: w.care_requirements,
       space_requirements: w.space_requirements,
@@ -1262,8 +1315,8 @@ const WardForm = ({
   };
 
   return (
-    <form
-      onSubmit={(e) => { e.preventDefault(); void onSubmit(form, carriedImages, pendingImages); }}
+    <form id="ward-editor"
+      onSubmit={(e) => { e.preventDefault(); const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null; void onSubmit(form, carriedImages, pendingImages, submitter?.value === "documents"); }}
       className="mt-8 grid gap-5 border border-border bg-surface p-8 md:grid-cols-2"
     >
       {myWards.length > 0 && !ward && (
@@ -1299,17 +1352,36 @@ const WardForm = ({
         </div>
       )}
 
+      <h2 className="md:col-span-2 font-display text-xl">1 · Tier bestimmen</h2>
       <Field label="Case-Code" required value={form.case_code} onChange={(v) => update("case_code", v)} placeholder="WARD-2026-001" />
       <Field label="Bezeichnung" required value={form.common_name} onChange={(v) => update("common_name", v)} placeholder="Bartagame, weiblich" />
       <SpeciesInput
         value={form.scientific_name}
+        listing={form.cites_listing}
+        onBusyChange={setSpeciesBusy}
         onChange={(v) => update("scientific_name", v)}
         onListingChange={(l) => update("cites_listing", l)}
       />
-      <Field label="Geschlecht" value={form.sex} onChange={(v) => update("sex", v)} placeholder="weiblich / männlich / unbekannt" />
+      <div>
+        <Label htmlFor="ward-cites">Schutzstatus (aus Artverzeichnis)</Label>
+        <Input id="ward-cites" className="mt-2" disabled={speciesBusy} value={form.cites_listing} onChange={(e) => update("cites_listing", e.target.value)} placeholder="Noch ungeklärt" list="ward-cites-values" />
+        <datalist id="ward-cites-values">{["I", "II", "III", "I/II", "I/II/NC", "NC"].map((listing) => <option key={listing} value={listing} />)}</datalist>
+        <p className="mt-1 text-xs text-muted-foreground">{protectionStatus(form.cites_listing).label}. Bei manueller Korrektur den Nachweis im Herkunftsfeld vermerken. EU-Anhänge nicht mit CITES gleichsetzen.</p>
+      </div>
+      <div><Label htmlFor="ward-sex">Geschlecht</Label><select id="ward-sex" className="mt-2 h-10 w-full border border-border bg-background px-3 text-sm" value={form.sex} onChange={(e) => update("sex", e.target.value)}>
+        <option value="">Noch nicht bestimmt</option><option value="weiblich">Weiblich</option><option value="männlich">Männlich</option><option value="unbekannt">Unbekannt</option>
+        {form.sex && !["weiblich", "männlich", "unbekannt"].includes(form.sex) && <option value={form.sex}>{form.sex}</option>}
+      </select></div>
       <Field label="Alter (geschätzt)" value={form.age_estimate} onChange={(v) => update("age_estimate", v)} placeholder="ca. 6 Jahre" />
       <Field label="Größe / Gewicht" value={form.size_estimate} onChange={(v) => update("size_estimate", v)} placeholder="48 cm / 420 g" />
-      <Field label="Standortregion" value={form.region} onChange={(v) => update("region", v)} placeholder="DE-Süd, AT, …" />
+      <h2 className="md:col-span-2 mt-3 font-display text-xl">2 · Aufnahme und Zuständigkeit</h2>
+      <div><Label htmlFor="ward-intake">Aufnahmegrund · Verpflichtend</Label><select id="ward-intake" required className="mt-2 h-10 w-full border border-border bg-background px-3 text-sm" value={form.intake_type} onChange={(e) => update("intake_type", intakeType(e.target.value))}>
+        {Object.entries(INTAKE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select><p className="mt-1 text-xs text-muted-foreground">Bestimmt die vorausgewählte Dokumentvorlage. Eigentum und amtliche Verwahrung werden gesondert erfasst.</p></div>
+      <div>
+        <Field label="Standortregion" value={isBehoerde ? region ?? "" : form.region} readOnly={isBehoerde} onChange={(v) => update("region", v)} placeholder="DE-Süd, AT, …" />
+        {isBehoerde && <p className="mt-1 text-xs text-muted-foreground">{region ? "Entspricht deinem zugewiesenen Zuständigkeitsgebiet." : "Bitte lasse dein Zuständigkeitsgebiet durch einen Admin hinterlegen."}</p>}
+      </div>
 
       <div>
         <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
@@ -1338,7 +1410,7 @@ const WardForm = ({
           aria-label="Vermittlungsart"
         >
           <option value="endstelle">Endstelle gesucht (Übereignung)</option>
-          <option value="pflegestelle">Pflegestelle gesucht (Tier bleibt Eigentum des Staates)</option>
+          <option value="pflegestelle">Pflegestelle gesucht (vorübergehende Betreuung)</option>
         </select>
       </div>
 
@@ -1380,11 +1452,12 @@ const WardForm = ({
             onChange={(e) => update("legal_custody", e.target.checked)}
             className="h-4 w-4 accent-primary"
           />
-          Amtliche Verwahrung (Tier bleibt Eigentum des Staates)
+          Amtliche Verwahrung / behördliche Anordnung
         </label>
       </div>
 
       <TextField label="Hintergrund / Herkunft (intern)" value={form.origin_context} onChange={(v) => update("origin_context", v)} />
+      <h2 className="md:col-span-2 mt-3 font-display text-xl">3 · Pflege und Unterbringung</h2>
       <TextField label="Vorgeschichte & Verhalten" required value={form.background} onChange={(v) => update("background", v)} />
       <TextField label="Pflegeanforderungen" required value={form.care_requirements} onChange={(v) => update("care_requirements", v)} />
       <TextField label="Platz- & Haltungsanforderungen" required value={form.space_requirements} onChange={(v) => update("space_requirements", v)} />
@@ -1433,42 +1506,40 @@ const WardForm = ({
         </div>
       </div>
 
-      <div className="md:col-span-2">
-        <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-          Sentinel-Zuweisung (User-ID, optional)
-        </Label>
-        <Input
-          value={form.assign_to}
-          onChange={(e) => update("assign_to", e.target.value)}
-          placeholder="user_… — leer = Ward bleibt bei dir"
-          className="mt-2 font-mono text-xs"
-        />
-        <p className="mt-1 text-xs text-muted-foreground">
-          Nur Sentinels mit freigegebener Bewerbung können zugewiesen werden.
-        </p>
-      </div>
+      {canAssign && <div className="md:col-span-2">
+        <SentinelPicker value={form.assign_to} onChange={(id) => update("assign_to", id)} disabled={submitting} />
+        <p className="mt-1 text-xs text-muted-foreground">Bei neuen Tieren ohne Zuweisung bleibst du zuständig.</p>
+      </div>}
 
-      <div className="md:col-span-2 flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onCancel}>
+      <div className="md:col-span-2 border border-border p-4 text-sm" role="status">
+        <p>Nach dem Speichern vorbereitet: {documentPlan({ intakeType: form.intake_type, cites: form.cites_listing, placementType: form.placement_type }).recommended.map((key) => ({ seizure: "Sicherstellungsprotokoll", found: "Fundmeldung", intake: "Aufnahme- / Abgabeprotokoll", cites: "Herkunftsnachweise / Übergabe", adoption: "Adoptionsvertrag" })[key]).join(" · ")}</p>
+        <p className="mt-1 text-xs text-muted-foreground">Fehlende Angaben werden im Dokumentformular als verpflichtend angezeigt.</p>
+      </div>
+      <div className="md:col-span-2 flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="outline" disabled={submitting} onClick={onCancel}>
           Abbrechen
         </Button>
-        <Button type="submit" disabled={submitting}>
+        <Button type="submit" variant="outline" disabled={submitting || speciesBusy}>
           {submitting ? "Wird gespeichert …" : ward ? "Änderungen speichern" : "Vetted-Only einstellen"}
         </Button>
+        <Button type="submit" value="documents" disabled={submitting || speciesBusy}>Speichern & Dokumente</Button>
       </div>
     </form>
   );
 };
 
 const Field = ({
-  label, required, placeholder, value, onChange,
-}: { label: string; required?: boolean; placeholder?: string; value: string; onChange: (v: string) => void }) => (
+  label, required, readOnly, placeholder, value, onChange,
+}: { label: string; required?: boolean; readOnly?: boolean; placeholder?: string; value: string; onChange: (v: string) => void }) => {
+  const id = useId();
+  return (
   <div>
-    <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+    <Label htmlFor={id} className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
       {label}{required && " *"}
     </Label>
-    <Input
+    <Input id={id}
       required={required}
+      readOnly={readOnly}
       placeholder={placeholder}
       value={value}
       onChange={(e) => onChange(e.target.value)}
@@ -1476,15 +1547,18 @@ const Field = ({
     />
   </div>
 );
+};
 
 const TextField = ({
   label, required, value, onChange,
-}: { label: string; required?: boolean; value: string; onChange: (v: string) => void }) => (
+}: { label: string; required?: boolean; value: string; onChange: (v: string) => void }) => {
+  const id = useId();
+  return (
   <div className="md:col-span-2">
-    <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+    <Label htmlFor={id} className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
       {label}{required && " *"}
     </Label>
-    <Textarea
+    <Textarea id={id}
       required={required}
       rows={3}
       value={value}
@@ -1493,6 +1567,7 @@ const TextField = ({
     />
   </div>
 );
+};
 
 const Meta = ({ label, value }: { label: string; value: string }) => (
   <div>

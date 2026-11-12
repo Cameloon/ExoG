@@ -53,6 +53,42 @@ export function capacityFromEnclosures(
   };
 }
 
+export function reflectWardAssignments(
+  enclosures: EnclosureSlot[],
+  wards: { case_code: string }[],
+): EnclosureSlot[] {
+  const caseCodes = new Set(wards.map((ward) => ward.case_code));
+  const assigned = new Set<string>();
+  return enclosures.map((enclosure) => {
+    const occupiedBy = enclosure.occupiedBy && caseCodes.has(enclosure.occupiedBy) && !assigned.has(enclosure.occupiedBy)
+      ? enclosure.occupiedBy
+      : undefined;
+    if (occupiedBy) assigned.add(occupiedBy);
+    return {
+      ...enclosure,
+      status: occupiedBy ? "belegt" : enclosure.status === "belegt" ? "frei" : enclosure.status,
+      occupiedBy,
+    };
+  });
+}
+
+export function assignWardToEnclosure(
+  enclosures: EnclosureSlot[],
+  caseCode: string,
+  enclosureId: string,
+): EnclosureSlot[] {
+  return enclosures.map((enclosure) => {
+    const occupiedBy = enclosure.id === enclosureId
+      ? caseCode
+      : enclosure.occupiedBy === caseCode ? undefined : enclosure.occupiedBy;
+    return {
+      ...enclosure,
+      status: occupiedBy ? "belegt" : enclosure.status === "belegt" ? "frei" : enclosure.status,
+      occupiedBy,
+    };
+  });
+}
+
 export async function fetchEnclosures(client: Client, userId: string): Promise<EnclosureSlot[]> {
   const { data, error } = await client
     .from("profiles")

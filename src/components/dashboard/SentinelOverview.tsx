@@ -85,17 +85,19 @@ const ENCLOSURE_TONE: Record<string, string> = {
 interface Props {
   sentinel: SentinelProfile;
   cases: CaseRecord[];
+  wardAssignments?: { wardId: string; caseId: string; name: string; enclosureId: string | null }[];
   activity: { day: string; logs: number }[];
   duties: Duty[];
   onToggleDuty: (id: string, done: boolean) => void;
-  onAddDuty: (d: { title: string; caseId?: string; dueIso: string; priority: DutyPriority; category: Duty["category"] }) => void;
+  onAddDuty: (d: { title: string; caseId?: string; dueIso: string; priority: DutyPriority; category: Duty["category"] }) => Promise<boolean>;
   onJumpToCase: (id: string) => void;
   /** Live only: persist the enclosure list (demo stays static without it). */
-  onSaveEnclosures?: (next: EnclosureSlot[]) => void;
+  onSaveEnclosures?: (next: EnclosureSlot[]) => Promise<boolean>;
+  onAssignWard?: (wardId: string, enclosureId: string) => Promise<boolean>;
   live?: boolean;
 }
 
-export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDuty, onAddDuty, onJumpToCase, onSaveEnclosures, live = false }: Props) => {
+export const SentinelOverview = ({ sentinel, cases, wardAssignments = [], activity, duties, onToggleDuty, onAddDuty, onJumpToCase, onSaveEnclosures, onAssignWard, live = false }: Props) => {
   const [newDuty, setNewDuty] = useState("");
   const [newCategory, setNewCategory] = useState<DutyCategory>("Klima");
   const [newPriority, setNewPriority] = useState<DutyPriority>("normal");
@@ -104,6 +106,9 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
 
   const canManageEnclosures = Boolean(onSaveEnclosures);
   const [editor, setEditor] = useState<{ slot: EnclosureSlot; originalId: string | null } | null>(null);
+  const [dutySaving, setDutySaving] = useState(false);
+  const [enclosureSaving, setEnclosureSaving] = useState(false);
+  const [assignmentSaving, setAssignmentSaving] = useState<string | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
 
   // Filter & Sort states
@@ -154,6 +159,9 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
     });
     return Array.from(map.entries());
   }, [sentinel.enclosures]);
+  const unassignedWards = wardAssignments.filter(
+    (ward) => !ward.enclosureId || !sentinel.enclosures.some((enclosure) => enclosure.id === ward.enclosureId),
+  );
 
   const maxLogs = Math.max(1, ...activity.map((a) => a.logs));
   const totalLogs = activity.reduce((s, a) => s + a.logs, 0);
@@ -163,16 +171,19 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
     if (d) onToggleDuty(id, !d.done);
   };
 
-  const addDuty = () => {
+  const addDuty = async () => {
     const t = newDuty.trim();
-    if (!t) return;
-    onAddDuty({
+    if (!t || dutySaving) return;
+    setDutySaving(true);
+    const saved = await onAddDuty({
       title: t,
       caseId: newCaseId === NONE_CASE ? undefined : newCaseId,
       dueIso: newDueIso || defaultDueIso(),
       priority: newPriority,
       category: newCategory,
     });
+    setDutySaving(false);
+    if (!saved) return;
     setNewDuty("");
     setNewCaseId(NONE_CASE);
     setNewPriority("normal");
@@ -210,8 +221,8 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
     setEditor({ slot, originalId: slot.id });
   };
 
-  const commitEnclosure = () => {
-    if (!editor || !onSaveEnclosures) return;
+  const commitEnclosure = async () => {
+    if (!editor || !onSaveEnclosures || enclosureSaving || assignmentSaving) return;
     const code = editor.slot.id.trim();
     if (!code) return setEditorError("Kürzel angeben.");
     if (sentinel.enclosures.some((e) => e.id === code && e.id !== editor.originalId)) {
@@ -223,16 +234,32 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
       sizeCm: editor.slot.sizeCm.trim(),
       occupiedBy: editor.slot.status === "belegt" ? editor.slot.occupiedBy : undefined,
     };
-    onSaveEnclosures(
+    setEnclosureSaving(true);
+    const saved = await onSaveEnclosures(
       editor.originalId === null
         ? [...sentinel.enclosures, slot]
         : sentinel.enclosures.map((e) => (e.id === editor.originalId ? slot : e)),
     );
-    setEditor(null);
+    setEnclosureSaving(false);
+    if (saved) setEditor(null);
+    else setEditorError("Nicht gespeichert. Deine Eingaben bleiben erhalten. Bitte erneut versuchen.");
   };
 
-  const deleteEnclosure = (id: string) =>
-    onSaveEnclosures?.(sentinel.enclosures.filter((e) => e.id !== id));
+  const deleteEnclosure = async (id: string) => {
+    if (!onSaveEnclosures || enclosureSaving || assignmentSaving || !window.confirm("Anlage entfernen?")) return;
+    setEnclosureSaving(true);
+    const saved = await onSaveEnclosures(sentinel.enclosures.filter((e) => e.id !== id));
+    setEnclosureSaving(false);
+    if (saved) setEditor(null);
+    else setEditorError("Anlage nicht entfernt. Bitte erneut versuchen.");
+  };
+
+  const assignWard = async (wardId: string, enclosureId: string) => {
+    if (!onAssignWard || !enclosureId || assignmentSaving || enclosureSaving) return;
+    setAssignmentSaving(wardId);
+    await onAssignWard(wardId, enclosureId);
+    setAssignmentSaving(null);
+  };
 
   return (
     <div className="grid gap-8 lg:grid-cols-12">
@@ -346,7 +373,7 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
                 </span>
               )}
               {canManageEnclosures && (
-                <Button size="sm" variant="outline" onClick={openNewEnclosure}>
+                <Button size="sm" variant="outline" disabled={enclosureSaving || assignmentSaving !== null} onClick={openNewEnclosure}>
                   <Plus className="mr-1.5 h-4 w-4" /> Anlage
                 </Button>
               )}
@@ -357,23 +384,82 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
             <EnclosureEditor
               slot={editor.slot}
               isNew={editor.originalId === null}
-              cases={cases}
               error={editorError}
+              saving={enclosureSaving || assignmentSaving !== null}
               onChange={(slot) => setEditor((prev) => (prev ? { ...prev, slot } : prev))}
               onCancel={() => setEditor(null)}
               onCommit={commitEnclosure}
               onDelete={() => {
-                if (editor.originalId) deleteEnclosure(editor.originalId);
-                setEditor(null);
+                if (editor.originalId) void deleteEnclosure(editor.originalId);
               }}
             />
           )}
 
+          {wardAssignments.length > 0 && (
+            <div className="border-b border-border p-6">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="eyebrow">Pflichtzuordnung · Tier zu Anlage</span>
+                <span className={`font-mono text-[10px] uppercase tracking-[0.18em] ${unassignedWards.length ? "text-destructive" : "text-success"}`} role={unassignedWards.length ? "alert" : "status"}>
+                  {unassignedWards.length
+                    ? `${unassignedWards.length} ${unassignedWards.length === 1 ? "Tier" : "Tiere"} ohne Anlage`
+                    : "Alle Tiere zugeordnet"}
+                </span>
+              </div>
+              <div className="mt-4 divide-y divide-border border-y border-border">
+                {wardAssignments.map((ward) => {
+                  const assigned = sentinel.enclosures.find((enclosure) => enclosure.id === ward.enclosureId);
+                  return (
+                    <div key={ward.wardId} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm">{ward.name}</div>
+                        <div className="font-mono text-[10px] text-muted-foreground">{ward.caseId}</div>
+                      </div>
+                      <Select
+                        value={assigned?.id ?? ""}
+                        onValueChange={(value) => void assignWard(ward.wardId, value)}
+                        disabled={!onAssignWard || assignmentSaving !== null || enclosureSaving || sentinel.enclosures.length === 0}
+                      >
+                        <SelectTrigger
+                          aria-label={`Terrarium für ${ward.caseId} · Pflicht`}
+                          aria-required="true"
+                          className="h-9 w-full border-border bg-background font-mono text-xs sm:w-72"
+                        >
+                          <SelectValue placeholder={sentinel.enclosures.length ? "Terrarium zuweisen · Pflicht" : "Zuerst Anlage anlegen"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ward.enclosureId && !assigned && (
+                            <SelectItem value={ward.enclosureId} disabled className="font-mono text-xs">
+                              Anlage {ward.enclosureId} fehlt · neu zuweisen
+                            </SelectItem>
+                          )}
+                          {sentinel.enclosures.map((enclosure) => {
+                            const usedByAnother = wardAssignments.some(
+                              (other) => other.wardId !== ward.wardId && other.enclosureId === enclosure.id,
+                            );
+                            const unavailable = usedByAnother || (!assigned && ["reinigung", "wartung"].includes(enclosure.status));
+                            return (
+                              <SelectItem key={enclosure.id} value={enclosure.id} disabled={unavailable} className="font-mono text-xs">
+                                {enclosure.id} · {enclosure.type}{usedByAnother ? " · belegt" : ["reinigung", "wartung"].includes(enclosure.status) ? ` · ${enclosure.status}` : ""}
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {sentinel.enclosures.length > 0 ? (
             <>
-              <div className="grid grid-cols-3 gap-px bg-border md:grid-cols-6">
+              <div className="flex flex-wrap gap-px bg-border">
                 {sentinel.enclosures.map((e) => (
-                  <div key={e.id} className="group relative bg-surface">
+                  <div
+                    key={e.id}
+                    className="group relative min-w-[30%] flex-1 bg-surface md:min-w-[15%]"
+                  >
                     <button
                       onClick={() => e.occupiedBy && onJumpToCase(e.occupiedBy)}
                       disabled={!e.occupiedBy}
@@ -401,6 +487,7 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
                       <button
                         onClick={() => openEnclosure(e)}
                         aria-label={`Anlage ${e.id} bearbeiten`}
+                        disabled={enclosureSaving || assignmentSaving !== null}
                         className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground"
                       >
                         <Pencil className="h-3 w-3" />
@@ -505,7 +592,7 @@ export const SentinelOverview = ({ sentinel, cases, activity, duties, onToggleDu
                 placeholder="Neue Pflicht erfassen…"
                 className="h-9 border-border bg-background font-mono text-sm"
               />
-              <Button size="sm" onClick={addDuty} disabled={!newDuty.trim()}>
+              <Button size="sm" onClick={addDuty} disabled={dutySaving || !newDuty.trim()}>
                 <Plus className="mr-1.5 h-4 w-4" /> Hinzufügen
               </Button>
             </div>
@@ -772,9 +859,9 @@ const DutyGroup = ({ label, icon, duties, onToggle, onJumpToCase, caseLabel }: D
 };
 
 interface EnclosureEditorProps {
+  saving: boolean;
   slot: EnclosureSlot;
   isNew: boolean;
-  cases: CaseRecord[];
   error: string | null;
   onChange: (slot: EnclosureSlot) => void;
   onCancel: () => void;
@@ -782,10 +869,10 @@ interface EnclosureEditorProps {
   onDelete: () => void;
 }
 
-const EnclosureEditor = ({ slot, isNew, cases, error, onChange, onCancel, onCommit, onDelete }: EnclosureEditorProps) => {
+const EnclosureEditor = ({ slot, isNew, error, saving, onChange, onCancel, onCommit, onDelete }: EnclosureEditorProps) => {
   const fieldLabel = "font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground";
   return (
-    <div className="space-y-3 border-b border-border bg-background/40 p-6">
+    <fieldset disabled={saving} className="min-w-0 space-y-3 border-b border-border bg-background/40 p-6">
       <div className="flex items-baseline justify-between">
         <span className="eyebrow">{isNew ? "Neue Anlage" : `Anlage ${slot.id} bearbeiten`}</span>
         <button onClick={onCancel} aria-label="Abbrechen" className="text-muted-foreground hover:text-foreground">
@@ -830,48 +917,24 @@ const EnclosureEditor = ({ slot, isNew, cases, error, onChange, onCancel, onComm
         </label>
         <label className="space-y-1">
           <span className={fieldLabel}>Status</span>
-          <Select
-            value={slot.status}
-            onValueChange={(v) => {
-              const status = v as EnclosureSlot["status"];
-              onChange({ ...slot, status, occupiedBy: status === "belegt" ? slot.occupiedBy : undefined });
-            }}
-          >
-            <SelectTrigger className="h-9 border-border bg-background font-mono text-xs uppercase">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ENCLOSURE_STATUSES.map((s) => (
-                <SelectItem key={s} value={s} className="font-mono text-xs uppercase">
-                  {s}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </label>
-        <label className="space-y-1 sm:col-span-2">
-          <span className={fieldLabel}>Belegung</span>
-          <Select
-            value={slot.occupiedBy ?? NONE_CASE}
-            onValueChange={(v) => {
-              const occupiedBy = v === NONE_CASE ? undefined : v;
-              onChange({ ...slot, occupiedBy, status: occupiedBy ? "belegt" : slot.status });
-            }}
-          >
-            <SelectTrigger className="h-9 border-border bg-background font-mono text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NONE_CASE} className="font-mono text-xs">
-                — frei —
-              </SelectItem>
-              {cases.map((c) => (
-                <SelectItem key={c.id} value={c.id} className="font-mono text-xs">
-                  {c.id} · {c.german}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {slot.status === "belegt" ? (
+            <div className="flex h-9 items-center border border-border bg-background px-3 font-mono text-xs uppercase text-primary">
+              belegt · Tierzuordnung
+            </div>
+          ) : (
+            <Select value={slot.status} onValueChange={(v) => onChange({ ...slot, status: v as EnclosureSlot["status"] })}>
+              <SelectTrigger className="h-9 border-border bg-background font-mono text-xs uppercase">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ENCLOSURE_STATUSES.filter((status) => status !== "belegt").map((status) => (
+                  <SelectItem key={status} value={status} className="font-mono text-xs uppercase">
+                    {status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </label>
       </div>
       {error && <p className="font-mono text-[11px] text-destructive">{error}</p>}
@@ -893,6 +956,6 @@ const EnclosureEditor = ({ slot, isNew, cases, error, onChange, onCancel, onComm
           Abbrechen
         </Button>
       </div>
-    </div>
+    </fieldset>
   );
 };

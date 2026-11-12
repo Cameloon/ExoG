@@ -13,14 +13,17 @@ export const ThemeToggle = ({ className }: { className?: string }) => {
 
   const toggle = () => {
     const next = isDark ? "light" : "dark";
-    // Use the View Transitions API for a buttery page crossfade when available
+    // Keep theme switching usable when motion is reduced or a resize skips the animation.
     const doc = document as Document & {
-      startViewTransition?: (cb: () => void) => { finished: Promise<void> };
+      startViewTransition?: (cb: () => void) => { ready: Promise<void>; finished: Promise<void> };
     };
-    if (typeof doc.startViewTransition === "function") {
-      doc.startViewTransition(() => {
+    if (typeof doc.startViewTransition === "function" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const transition = doc.startViewTransition(() => {
         setTheme(next);
       });
+      // `ready` rejects if the viewport changes or another transition supersedes it.
+      void transition.ready.catch(() => {});
+      void transition.finished.catch(() => setTheme(next));
     } else {
       setTheme(next);
     }

@@ -18,7 +18,17 @@ export interface CaseRecord {
   age: string;
   risk: RiskLevel;
   updated: string;
-  origin: "Behörde" | "Zivile Übergabe";
+  origin: "Behörde" | "Zivile Übergabe" | "Fund" | "Abgabe" | "Übernahme" | "Ungeklärt";
+  wardId?: string;
+  intakeType?: import("./animal-workflow").IntakeType;
+  originContext?: string;
+  background?: string;
+  careRequirements?: string;
+  spaceRequirements?: string;
+  sex?: string;
+  size?: string;
+  placementType?: "endstelle" | "pflegestelle";
+  legalCustody?: boolean;
   outcome?: "Sanctuary" | "Sentinel-Endpunkt" | "Rückführung Halter";
 }
 

@@ -23,10 +23,10 @@ await db.exec(`
 `);
 const root = new URL('../external-supabase/migrations/', import.meta.url);
 for (const file of fs.readdirSync(root).filter(f => f.endsWith('.sql')).sort()) {
-  await db.exec(fs.readFileSync(new URL(file, root), 'utf8'));
+  const migration = fs.readFileSync(new URL(file, root), 'utf8');
+  await db.exec(migration);
+  if (file === '00038_review_remediation.sql') await db.exec(migration);
 }
-const remediation = fs.readFileSync(new URL('00038_review_remediation.sql', root), 'utf8');
-await db.exec(remediation); // forward migration must also be safe to retry
 console.log('Fresh migration replay and remediation replay passed');
 
 const query = async sql => (await db.query(sql)).rows;
@@ -38,6 +38,7 @@ async function actor(sub, app_role = 'user', region) {
 }
 const shelter = '10000000-0000-0000-0000-000000000001';
 const ward = '20000000-0000-0000-0000-000000000001';
+const govWard = '20000000-0000-0000-0000-000000000002';
 await db.exec(`
   insert into public.sentinel_applications(user_id,case_id,full_name,email,region,experience_years,capacity,motivation,status,pledge_data) values
   ('victim','ST-VICTIM','Person','private@example.test','Berlin',5,'1','motivation','approved','{"questionnaire":{"street":"Street","phone":"123","birth_date":"1990-01-01"},"commitments":{"truthful":true}}'),
@@ -48,7 +49,20 @@ await db.exec(`
   insert into public.shelters(id,owner_id,name,region) values ('${shelter}','shelter','Shelter','Bayern');
   insert into public.ward_listings(id,owner_id,shelter_id,case_code,common_name,background,care_requirements,space_requirements,region)
     values ('${ward}','victim','${shelter}','WARD-1','Animal','b','c','s','Berlin');
+  insert into public.ward_listings(id,owner_id,case_code,common_name,background,care_requirements,space_requirements,region,visibility)
+    values ('${govWard}','authority','WARD-GOV','Rescue animal','b','c','s','Bayern','admin_only');
 `);
+
+// Structured intake stays within the existing ward permissions.
+await actor('victim');
+assert.equal((await query(`select intake_type from public.ward_listings where id='${ward}'`))[0].intake_type, 'unknown');
+await db.exec(`update public.ward_listings set intake_type='found' where id='${ward}'`);
+await assert.rejects(() => db.query(`update public.ward_listings set intake_type='invented' where id='${ward}'`), /ward_intake_type_valid/);
+await actor('ordinary');
+await db.exec(`update public.ward_listings set intake_type='surrendered' where id='${ward}'`);
+await actor('victim');
+assert.equal((await query(`select intake_type from public.ward_listings where id='${ward}'`))[0].intake_type, 'found');
+console.log('Intake defaults, valid values and existing ownership restrictions passed');
 
 for (const [user, role] of [['shelter','einrichtung'],['gov','behoerde'],['admin','admin'],['approved_shelter','user']]) {
   await actor(user, role, 'Bayern');
@@ -70,6 +84,48 @@ await denied('select * from public.list_sentinels()');
 await db.exec('reset role; set role anon');
 await denied('select * from public.list_sentinels()');
 console.log('Nationwide triage discovery, private-field redaction, role boundaries and pagination passed');
+
+// Authority placement is request/consent based; a direct client-side owner transfer is forbidden.
+await db.exec('reset role');
+await db.exec(`insert into public.sentinel_applications(user_id,case_id,full_name,email,region,experience_years,capacity,motivation,status,pledge_data)
+  values ('sentinel2','ST-SENTINEL-2','Sentinel Two','sentinel2@example.test','Bayern',3,'1','motivation','approved','{}')`);
+await actor('authority','behoerde','Bayern');
+assert.deepEqual(await query("select public.current_clerk_user_id() as uid, public.current_region() as region, public.is_gov_for_region('Bayern') as can_triage"),
+  [{ uid: 'authority', region: 'Bayern', can_triage: true }]);
+assert.deepEqual(await query(`select auth.jwt()->>'app_role' as role, public.is_approved_sentinel('sentinel') as approved,
+  exists(select 1 from public.ward_listings w where w.id='${govWard}' and w.owner_id='authority'
+    and w.status in ('available','under_review') and public.is_gov_for_region(w.region)) as ward_ok`),
+  [{ role: 'behoerde', approved: true, ward_ok: true }]);
+await assert.rejects(() => db.query(`update public.ward_listings set owner_id='sentinel' where id='${govWard}'`), /Authorities must request/);
+await assert.rejects(() => db.query(`insert into public.ward_listings(owner_id,case_code,common_name,background,care_requirements,space_requirements,region)
+  values ('sentinel','WARD-DIRECT','Animal','b','c','s','Bayern')`), /Authorities must request/);
+const [{ id: declinedRequest }] = await query(`insert into public.authority_ward_assignment_requests(ward_id,authority_id,sentinel_id)
+  values ('${govWard}','authority','sentinel') returning id`);
+await assert.rejects(() => db.query(`insert into public.authority_ward_assignment_requests(ward_id,authority_id,sentinel_id)
+  values ('${govWard}','authority','pending')`), /row-level security/);
+await actor('sentinel');
+assert.equal((await query('select id from public.authority_ward_assignment_requests')).length,1);
+assert.equal((await query(`select id from public.ward_listings where id='${govWard}'`)).length,1);
+await db.query(`select public.respond_authority_ward_assignment_request('${declinedRequest}',false)`);
+assert.equal((await query(`select status from public.authority_ward_assignment_requests where id='${declinedRequest}'`))[0].status,'declined');
+assert.equal((await query(`select id from public.ward_listings where id='${govWard}'`)).length,0);
+await actor('authority','behoerde','Bayern');
+assert.equal((await query(`select owner_id from public.ward_listings where id='${govWard}'`))[0].owner_id,'authority');
+const [{ id: acceptedRequest }] = await query(`insert into public.authority_ward_assignment_requests(ward_id,authority_id,sentinel_id)
+  values ('${govWard}','authority','sentinel') returning id`);
+const [{ id: competingRequest }] = await query(`insert into public.authority_ward_assignment_requests(ward_id,authority_id,sentinel_id)
+  values ('${govWard}','authority','sentinel2') returning id`);
+const [{ id: crossStateRequest }] = await query(`insert into public.authority_ward_assignment_requests(ward_id,authority_id,sentinel_id)
+  values ('${govWard}','authority','victim') returning id`);
+await actor('sentinel');
+await db.query(`select public.respond_authority_ward_assignment_request('${acceptedRequest}',true)`);
+assert.equal((await query(`select owner_id from public.ward_listings where id='${govWard}'`))[0].owner_id,'sentinel');
+assert.equal((await query(`select status from public.ward_listings where id='${govWard}'`))[0].status,'under_review');
+assert.equal((await query(`select status from public.authority_ward_assignment_requests where id='${acceptedRequest}'`))[0].status,'accepted');
+await actor('authority','behoerde','Bayern');
+assert.equal((await query(`select status from public.authority_ward_assignment_requests where id='${competingRequest}'`))[0].status,'cancelled');
+assert.equal((await query(`select status from public.authority_ward_assignment_requests where id='${crossStateRequest}'`))[0].status,'cancelled');
+console.log('Authority requests require sentinel consent; decline preserves custody and acceptance transfers atomically');
 
 await actor('new_authority','behoerde');
 await denied("insert into public.profiles(id,region) values ('new_authority','Berlin')");
@@ -94,8 +150,16 @@ assert.equal((await query('select status from public.sentinel_shelter_requests')
 await db.exec("update public.sentinel_shelter_requests set status='withdrawn'");
 await db.exec("update public.sentinel_shelter_requests set status='open', sentinel_hidden=false");
 await db.exec(`insert into public.ward_interest(ward_id,applicant_id,message) values ('${ward}','sentinel','m')`);
+const [{id: interestId}] = await query('select id from public.ward_interest');
+await denied(`select public.match_ward_interest('${interestId}')`);
+await actor('unscoped','behoerde');
+await denied(`select public.match_ward_interest('${interestId}')`);
 await actor('shelter','einrichtung');
-await db.exec("update public.ward_interest set status='matched'");
+await db.exec(`select public.match_ward_interest('${interestId}')`);
+assert.equal((await query(`select owner_id from public.ward_listings where id='${ward}'`))[0].owner_id,'sentinel');
+await db.exec(`select public.match_ward_interest('${interestId}')`);
+// Restore the deletion fixture after proving assignment persisted.
+await db.exec(`update public.ward_listings set owner_id='victim' where id='${ward}'`);
 await denied("update public.ward_interest set applicant_id='victim'");
 console.log('Expert-tier protection and request create/accept/hide/withdraw/reopen protections passed');
 
@@ -112,6 +176,20 @@ assert.equal((await query("select pledge_data#>>'{questionnaire,street}' as stre
 await actor('sentinel');
 await db.exec(`delete from public.sentinel_change_requests where id='${request}'`);
 assert.equal((await query(`select status from public.sentinel_change_requests where id='${request}'`))[0].status,'approved');
+await actor('ordinary');
+await denied("select public.review_sentinel_application((select id from public.sentinel_applications limit 1),'approved','S4','')");
+await actor('admin','admin');
+await db.exec(`reset role;
+  create function public.test_fail_review() returns trigger language plpgsql as $$ begin raise exception 'injected audit failure'; end $$;
+  create trigger test_fail_review before insert on public.application_audit_log for each row execute function public.test_fail_review();`);
+await actor('admin','admin');
+await assert.rejects(() => db.query("select public.review_sentinel_application(id,'approved','S4','test') from public.sentinel_applications where user_id='pending'"), /injected audit failure/);
+assert.equal((await query("select status from public.sentinel_applications where user_id='pending'"))[0].status,'pending');
+await db.exec('reset role; drop trigger test_fail_review on public.application_audit_log');
+await actor('admin','admin');
+await db.exec("select public.review_sentinel_application(id,'approved','S4','Nachweise geprüft') from public.sentinel_applications where user_id='pending'");
+assert.equal((await query("select tier from public.sentinel_applications where user_id='pending'"))[0].tier,'S4');
+assert.equal((await query("select count(*)::int n from public.application_audit_log where notes like '%Nachweise geprüft%'"))[0].n,1);
 console.log('Atomic address review and immutable reviewed request passed');
 
 await denied("select public.delete_account_data('victim')");
@@ -119,6 +197,7 @@ await db.exec('reset role');
 await db.exec(`insert into public.application_audit_log(application_id,actor_id,action)
   select id,'admin','approved' from public.sentinel_applications where user_id='victim';
   insert into public.change_log(actor_id,action,table_name,record_id) values ('victim','UPDATE','ward_listings','${ward}');
+  insert into public.authority_ward_assignment_requests(ward_id,authority_id,sentinel_id) values ('${ward}','victim','sentinel');
   create function public.test_fail_delete() returns trigger language plpgsql as $$ begin raise exception 'injected failure'; end $$;
   create trigger test_fail_delete before delete on public.profiles for each row execute function public.test_fail_delete();
   set role service_role;
@@ -126,12 +205,14 @@ await db.exec(`insert into public.application_audit_log(application_id,actor_id,
 await assert.rejects(() => db.query("select public.delete_account_data('victim')"), /injected failure/);
 assert.equal((await query("select * from public.sentinel_applications where user_id='victim'")).length,1);
 assert.equal((await query("select owner_id from public.ward_listings where id='"+ward+"'"))[0].owner_id,'victim');
+assert.equal((await query("select * from public.authority_ward_assignment_requests where authority_id='victim'")).length,1);
 assert.equal((await query('select * from public.account_deletion_jobs')).length,0);
 await db.exec('reset role; drop trigger test_fail_delete on public.profiles; set role service_role');
 await db.exec("select public.delete_account_data('victim')");
 await db.exec("select public.delete_account_data('victim')");
 assert.equal((await query("select * from public.sentinel_applications where user_id='victim'")).length,0);
-assert.equal((await query('select application_id from public.application_audit_log'))[0].application_id,null);
+assert.equal((await query("select * from public.authority_ward_assignment_requests where authority_id='victim' or sentinel_id='victim'")).length,0);
+assert.ok((await query('select application_id from public.application_audit_log where application_id is null')).length > 0);
 assert.equal((await query("select count(*)::int n from public.change_log where actor_id='victim'"))[0].n,0);
 await denied("update public.change_log set actor_id='attacker'");
 console.log('Transactional account deletion, audit retention, restricted command and retry passed');

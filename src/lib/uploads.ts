@@ -42,3 +42,20 @@ export async function sniffDocument(file: File): Promise<SniffedImage | null> {
     return { ext: "pdf", mime: "application/pdf" };
   return sniff(head);
 }
+
+/**
+ * Unique storage object id. `crypto.randomUUID` only exists in secure
+ * contexts (https/localhost) — plain http or LAN IPs throw
+ * "crypto.randomUUID is not a function". `getRandomValues` works there too.
+ */
+export function uploadId(): string {
+  const c = globalThis.crypto;
+  if (typeof c?.randomUUID === "function") return c.randomUUID();
+  if (typeof c?.getRandomValues === "function") {
+    const bytes = c.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // UUID v4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}

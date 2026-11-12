@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { SpeciesInput } from "@/components/SpeciesInput";
+import { INTAKE_TYPES, intakeType, protectionStatus, type IntakeType } from "@/lib/animal-workflow";
+import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { useAuth } from "@/hooks/auth-context";
 import { Button } from "@/components/ui/button";
@@ -7,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { sniffImage } from "@/lib/uploads";
+import { sniffImage, uploadId } from "@/lib/uploads";
 import { RegionSelect } from "@/components/RegionSelect";
 import { BUNDESLAENDER } from "@/lib/germanRegions";
 import { Plus, X, ImagePlus, PawPrint, MapPin } from "lucide-react";
@@ -38,6 +41,8 @@ type FormState = {
   case_code: string;
   common_name: string;
   scientific_name: string;
+  cites_listing: string;
+  intake_type: IntakeType;
   sex: string;
   age_estimate: string;
   size_estimate: string;
@@ -50,7 +55,7 @@ type FormState = {
 };
 
 const emptyForm: FormState = {
-  case_code: "", common_name: "", scientific_name: "", sex: "",
+  case_code: "", common_name: "", scientific_name: "", cites_listing: "", intake_type: "unknown", sex: "",
   age_estimate: "", size_estimate: "", region: "", urgency: "standard",
   origin_context: "", background: "", care_requirements: "", space_requirements: "",
 };
@@ -72,6 +77,8 @@ const statusLabel: Record<Ward["status"], string> = {
 };
 
 export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
+  const navigate = useNavigate();
+  const [speciesBusy, setSpeciesBusy] = useState(false);
   const { user, isAdmin, isEinrichtung } = useAuth();
   const supabase = useExternalSupabase();
   const storage = supabase.storage;
@@ -119,13 +126,14 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
       if (error || !data) return;
       const next: Record<string, string> = {};
       data.forEach((d, i) => { if (d.signedUrl) next[missing[i]] = d.signedUrl; });
-      setSignedUrls((prev) => ({ ...prev, ...next }));
+      if (Object.keys(next).length) setSignedUrls((prev) => ({ ...prev, ...next }));
     })();
   }, [wards, signedUrls, storage]);
 
   const loadWards = async () => {
     let q = supabase.from("ward_listings").select("*").order("created_at", { ascending: false });
     if (shelterId) q = q.eq("shelter_id", shelterId);
+    else if (user) q = q.eq("owner_id", user.id);
     q = q.limit(200);
     const { data, error } = await q;
     if (error) {
@@ -161,7 +169,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
         toast({ title: "Ungültiges Bild", description: `${file.name}: nur JPG/PNG/WebP/GIF/AVIF bis 10 MB.`, variant: "destructive" });
         return;
       }
-      const path = `${user.id}/${crypto.randomUUID()}.${img.ext}`;
+      const path = `${user.id}/${uploadId()}.${img.ext}`;
       const { error: upErr } = await supabase.storage
         .from("ward-images").upload(path, file, { contentType: img.mime, upsert: false });
       if (upErr) {
@@ -178,6 +186,8 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
       case_code: form.case_code.trim(),
       common_name: form.common_name.trim(),
       scientific_name: form.scientific_name.trim() || null,
+      cites_listing: form.cites_listing || null,
+      intake_type: form.intake_type,
       sex: form.sex.trim() || null,
       age_estimate: form.age_estimate.trim() || null,
       size_estimate: form.size_estimate.trim() || null,
@@ -189,7 +199,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
       urgency: form.urgency || "standard",
       images: [...carriedImages, ...uploadedPaths],
     };
-    const { error } = await supabase.from("ward_listings").insert(payload);
+    const { data: created, error } = await supabase.from("ward_listings").insert(payload).select("id, case_code").single();
     setSubmitting(false);
     if (error) {
       await cleanupUploads();
@@ -200,6 +210,7 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
     setShowForm(false);
     resetForm();
     void loadWards();
+    if (created) navigate(`/wards?search=${encodeURIComponent(created.case_code)}&documents=${created.id}`);
   };
 
   const update = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((p) => ({ ...p, [k]: v }));
@@ -210,9 +221,9 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
 
   return (
     <div>
-      <div className="flex items-end justify-between border-b border-border pb-4">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-4">
         <p className="font-mono text-xs text-muted-foreground">
-          {myWards.length} {myWards.length === 1 ? "eigenes Tier" : "eigene Tiere"} erfasst
+          {myWards.length} zuletzt erfasste Tiere geladen
         </p>
         <Button
           onClick={() => { if (showForm) resetForm(); setShowForm(!showForm); }}
@@ -227,7 +238,8 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
         <form onSubmit={submitWard} className="mt-8 grid gap-5 border border-border bg-surface p-8 md:grid-cols-2">
           <Field label="Case-Code" required value={form.case_code} onChange={(v) => update("case_code", v)} placeholder="WARD-2026-001" />
           <Field label="Bezeichnung" required value={form.common_name} onChange={(v) => update("common_name", v)} placeholder="Bartagame, weiblich" />
-          <Field label="Wiss. Name" value={form.scientific_name} onChange={(v) => update("scientific_name", v)} placeholder="Pogona vitticeps" />
+          <div><SpeciesInput onBusyChange={setSpeciesBusy} value={form.scientific_name} onChange={(v) => update("scientific_name", v)} onListingChange={(v) => update("cites_listing", v)} /><p className="mt-2 text-xs text-muted-foreground">{protectionStatus(form.cites_listing).label}</p></div>
+          <div><Label htmlFor="shelter-intake">Aufnahmegrund · Verpflichtend</Label><select id="shelter-intake" required className="mt-2 h-10 w-full border border-border bg-background px-3 text-sm" value={form.intake_type} onChange={(e) => update("intake_type", intakeType(e.target.value))}>{Object.entries(INTAKE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
           <Field label="Geschlecht" value={form.sex} onChange={(v) => update("sex", v)} placeholder="weiblich / männlich / unbekannt" />
           <Field label="Alter (geschätzt)" value={form.age_estimate} onChange={(v) => update("age_estimate", v)} placeholder="ca. 6 Jahre" />
           <Field label="Größe / Gewicht" value={form.size_estimate} onChange={(v) => update("size_estimate", v)} placeholder="48 cm / 420 g" />
@@ -288,13 +300,14 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
           </div>
 
           <div className="md:col-span-2 flex justify-end">
-            <Button type="submit" disabled={submitting}>
-              {submitting ? "Wird erfasst …" : "Tier speichern"}
+            <Button type="submit" disabled={submitting || speciesBusy}>
+              {submitting ? "Wird erfasst …" : "Speichern & Dokumente"}
             </Button>
           </div>
         </form>
       )}
 
+      <Button asChild variant="outline" className="mt-4"><Link to="/wards">Alle Tiere verwalten · Pflege, Quarantäne & Übergaben</Link></Button>
       <h2 className="font-display text-2xl flex items-center gap-2 mt-10"><PawPrint className="h-5 w-5 text-primary" /> Tiere</h2>
       <div className="mt-4 grid gap-px bg-border md:grid-cols-2">
         {myWards.length === 0 && (
@@ -324,6 +337,8 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
                 <Badge className={urgencyTone[w.urgency] ?? urgencyTone.standard}>{urgencyLabel[w.urgency] ?? w.urgency}</Badge>
               </div>
               <p className="mt-3 text-sm text-muted-foreground line-clamp-3">{w.background}</p>
+              <Button asChild variant="outline" size="sm" className="mt-4"><Link to={`/wards?search=${encodeURIComponent(w.case_code)}`}>Details & bearbeiten</Link></Button>
+              <Button asChild variant="ghost" size="sm" className="mt-4"><Link to={`/wards?search=${encodeURIComponent(w.case_code)}&documents=${w.id}`}>Dokumente</Link></Button>
               {w.region && (
                 <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
                   <MapPin className="h-3 w-3" /> {w.region}
@@ -338,19 +353,23 @@ export const WardManager = ({ shelterId }: { shelterId: string | null }) => {
 };
 
 const Field = ({ label, required, placeholder, value, onChange }:
-  { label: string; required?: boolean; placeholder?: string; value: string; onChange: (v: string) => void }) => (
+  { label: string; required?: boolean; placeholder?: string; value: string; onChange: (v: string) => void }) => {
+  const id = useId(); return (
   <div>
-    <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{label}{required && " *"}</Label>
-    <Input required={required} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} className="mt-2" />
+    <Label htmlFor={id} className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{label}{required && " *"}</Label>
+    <Input id={id} required={required} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} className="mt-2" />
   </div>
 );
+};
 
 const TextField = ({ label, required, value, onChange }:
-  { label: string; required?: boolean; value: string; onChange: (v: string) => void }) => (
+  { label: string; required?: boolean; value: string; onChange: (v: string) => void }) => {
+  const id = useId(); return (
   <div className="md:col-span-2">
-    <Label className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{label}{required && " *"}</Label>
-    <Textarea required={required} rows={3} value={value} onChange={(e) => onChange(e.target.value)} className="mt-2" />
+    <Label htmlFor={id} className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{label}{required && " *"}</Label>
+    <Textarea id={id} required={required} rows={3} value={value} onChange={(e) => onChange(e.target.value)} className="mt-2" />
   </div>
 );
+};
 
 // ponytail: card mirrors Behoerde/Sentinel ward styling.

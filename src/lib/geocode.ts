@@ -3,13 +3,13 @@
 // navigation (a cached null previously made maps stay empty forever).
 const cache = new Map<string, [number, number]>();
 
-export async function geocode(query: string): Promise<[number, number] | null> {
+export async function geocode(query: string, signal?: AbortSignal): Promise<[number, number] | null> {
   const key = query.trim();
-  if (!key) return null;
+  if (!key || signal?.aborted) return null;
   const cached = cache.get(key);
   if (cached) return cached;
   try {
-    const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(key)}&limit=1`);
+    const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(key)}&limit=1`, { signal });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       features?: { geometry?: { coordinates?: [number, number] } }[];

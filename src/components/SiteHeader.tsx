@@ -6,12 +6,14 @@ import { Logo } from "./Logo";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/auth-context";
+import { appNavigation } from "@/lib/app-navigation";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export const SiteHeader = () => {
   const { t } = useTranslation();
   const location = useLocation();
-  const { user, isAdmin, isBehoerde, isEinrichtung, canBrowseSentinels, role, signOut } = useAuth();
+  const auth = useAuth();
+  const { user, signOut } = auth;
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // Logged-out: public landing/marketing nav. Logged-in: role-based app nav
@@ -21,33 +23,11 @@ export const SiteHeader = () => {
     { href: "/pledge", label: t("nav.pledge"), type: "route" as const },
     { href: "/werte", label: t("nav.werte"), type: "route" as const },
     { href: "/wards", label: "Wards", type: "route" as const },
-    { href: "/#system", label: t("nav.system"), type: "anchor" as const },
-    { href: "/#workflow", label: t("nav.workflow"), type: "anchor" as const },
+    { href: "/#sentinel", label: t("nav.system"), type: "anchor" as const },
+    { href: "/#ablauf", label: t("nav.workflow"), type: "anchor" as const },
   ];
 
-  const appNav = [
-    ...(isBehoerde ? [
-      { href: "/behoerde", label: "Dashboard", type: "route" as const },
-      { href: "/sentinels", label: "Network", type: "route" as const },
-      { href: "/behoerde/verwaltung", label: "Verwaltung", type: "route" as const },
-    ] : []),
-    ...(isEinrichtung ? [
-      { href: "/shelters", label: "Einrichtung", type: "route" as const },
-      { href: "/care", label: "Pflege", type: "route" as const },
-      { href: "/wards", label: "Wards", type: "route" as const },
-    ] : []),
-    ...(role === "sentinel" ? [
-      { href: "/care", label: "Pflege", type: "route" as const },
-      { href: "/sentinel/network", label: "Netzwerk", type: "route" as const },
-      { href: "/wards", label: "Wards", type: "route" as const },
-    ] : []),
-    ...(role === "user" ? [
-      { href: "/sentinel/apply", label: "Registrierung", type: "route" as const },
-    ] : []),
-    ...(canBrowseSentinels && !isBehoerde ? [{ href: "/sentinels", label: "Sentinels finden", type: "route" as const }] : []),
-    ...(isAdmin ? [{ href: "/admin", label: t("nav.admin"), type: "route" as const }] : []),
-    ...(user ? [{ href: "/account", label: t("nav.account"), type: "route" as const }] : []),
-  ];
+  const appNav = appNavigation(auth);
 
   const nav = user ? appNav : publicNav;
 
@@ -56,11 +36,12 @@ export const SiteHeader = () => {
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
       <div className="container flex h-16 items-center justify-between">
-        <Logo to="/start" />
-        <nav className="hidden items-center gap-7 md:flex">
+        <Logo to={user ? "/dashboard" : "/start"} />
+        <nav aria-label="Hauptnavigation" className="hidden items-center gap-5 2xl:flex">
           {nav.map((n) =>
             n.type === "route" ? (
               <Link key={n.href} to={n.href}
+                aria-current={location.pathname === n.href ? "page" : undefined}
                 className={`font-mono text-xs uppercase tracking-[0.18em] transition-colors hover:text-foreground ${
                   location.pathname === n.href ? "text-primary" : "text-muted-foreground"
                 }`}>
@@ -92,7 +73,9 @@ export const SiteHeader = () => {
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="2xl:hidden"
+            aria-expanded={mobileOpen}
+            aria-controls="app-mobile-navigation"
             aria-label="Menü öffnen"
             onClick={() => setMobileOpen(true)}
           >
@@ -106,7 +89,7 @@ export const SiteHeader = () => {
         <SheetContent side="right" className="flex w-[88vw] max-w-xs flex-col gap-0 p-0">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
           <div className="flex h-16 items-center border-b border-border px-6">
-            <Logo to="/start" />
+            <Logo to={user ? "/dashboard" : "/start"} />
           </div>
 
           {/* Primary CTA — full-width on mobile */}
@@ -130,12 +113,13 @@ export const SiteHeader = () => {
           </div>
 
           {/* Nav links */}
-          <nav className="flex flex-col py-2">
+          <nav id="app-mobile-navigation" aria-label="Mobile Navigation" className="flex flex-col overflow-y-auto py-2">
             {nav.map((n) =>
               n.type === "route" ? (
                 <Link
                   key={n.href}
                   to={n.href}
+                aria-current={location.pathname === n.href ? "page" : undefined}
                   onClick={closeMobile}
                   className={`border-b border-border/60 px-6 py-4 font-mono text-xs uppercase tracking-[0.18em] transition-colors hover:bg-surface-elevated hover:text-foreground ${
                     location.pathname === n.href ? "text-primary" : "text-muted-foreground"

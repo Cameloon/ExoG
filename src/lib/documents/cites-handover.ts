@@ -16,7 +16,7 @@ import {
   embedImageAttachments,
   ATTACHMENT_KIND_LABEL,
   type Attachment,
-  SENDER,
+  documentSender,
   CONFIDENTIALITY_NOTICE,
   LEGAL_BASIS,
   type DocMeta,
@@ -27,6 +27,10 @@ export const CITES_VERSION = "1.1.0";
 
 export type CitesHandoverInput = {
   caseRecord: CaseRecord;
+  certificateStatus?: string;
+  missingEvidence?: string;
+  draft?: boolean;
+  missingFields?: string[];
   sentinel: SentinelProfile;
   /** EG-Bescheinigung / Herkunftsnachweis Nr. */
   citesCertificateNo: string;
@@ -53,6 +57,7 @@ export type CitesHandoverInput = {
 };
 
 export async function exportCitesHandover(input: CitesHandoverInput) {
+  const SENDER = documentSender(input.sentinel);
   const { default: jsPDF } = await import("jspdf");
   const meta: DocMeta = {
     title: "CITES- / Herkunftsnachweis & Übergabeprotokoll",
@@ -68,6 +73,7 @@ export async function exportCitesHandover(input: CitesHandoverInput) {
     version: CITES_VERSION,
     generatedAt: nowIso(),
     authoredBy: input.sentinel.name,
+    sender: SENDER, draft: input.draft, missingFields: input.missingFields,
   };
 
   const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -80,6 +86,8 @@ export async function exportCitesHandover(input: CitesHandoverInput) {
   cur.y = sectionHeader(doc, cur.y, "1 · Herkunfts- / CITES-Nachweis", cur.margin);
   cur.y = defList(doc, cur.y, cur.margin, [
     ["Bescheinigung Nr.", input.citesCertificateNo],
+    ["Nachweisstand", input.certificateStatus === "available" ? "Unterlagen vorhanden" : "Nachweise / Anwendbarkeit noch zu klären"],
+    ["Offene Nachweise", input.missingEvidence ?? ""],
     ["Ausstellende Behörde", input.issuingAuthority],
     ["Ausgestellt am", input.issuedAt],
     ["CITES-Anhang", input.caseRecord.cites],
@@ -147,6 +155,7 @@ export async function exportCitesHandover(input: CitesHandoverInput) {
     {
       schema: "exoguard.cites-handover/1.0",
       docKitVersion: DOC_KIT_VERSION,
+      completion: { draft: Boolean(input.draft), missingFields: input.missingFields ?? [] },
       documentVersion: meta.version,
       documentId: meta.docId,
       generatedAt: meta.generatedAt,
@@ -155,6 +164,8 @@ export async function exportCitesHandover(input: CitesHandoverInput) {
       case: input.caseRecord,
       sentinel: input.sentinel,
       cites: {
+        certificateStatus: input.certificateStatus,
+        missingEvidence: input.missingEvidence,
         certificateNo: input.citesCertificateNo,
         issuingAuthority: input.issuingAuthority,
         issuedAt: input.issuedAt,

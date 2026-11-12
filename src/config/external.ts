@@ -9,12 +9,15 @@
 
 const env = import.meta.env;
 
+/* do we even need a fallback? the env vars should be set in the .env file, and if not, the app will show a config missing page. 
+ * lets keept it for now but get rid of it as soon as it goes into beta*/
 const FALLBACK = {
   SUPABASE_URL: "https://tckckikvmnuvjgsctvkr.supabase.co",
   SUPABASE_ANON_KEY: "sb_publishable_es2M4yzpEBzj5rETBCnQYw_tps2kiNm",
   CLERK_PUBLISHABLE_KEY: "pk_test_aWRlYWwtdGV0cmEtMjYuY2xlcmsuYWNjb3VudHMuZGV2JA",
   CLERK_SUPABASE_JWT_TEMPLATE: "supabase",
 };
+
 
 export const EXTERNAL_CONFIG = {
   // Supabase project (Settings → API)

@@ -32,6 +32,7 @@ interface Application {
   pledge_data: Record<string, unknown>;
   status: Status;
   kyc_status: string;
+  tier: string;
   reviewer_notes: string | null;
   created_at: string;
 }
@@ -73,6 +74,7 @@ const Admin = () => {
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [preview, setPreview] = useState<{ url: string; mime: string } | null>(null);
   const [notes, setNotes] = useState("");
+  const [tier, setTier] = useState("S1");
   const [busy, setBusy] = useState(false);
   const [shelterReqs, setShelterReqs] = useState<
     { id: string; user_id: string; email: string; display_name: string | null; status: string }[]
@@ -266,6 +268,7 @@ const Admin = () => {
 
   const openApp = async (app: Application) => {
     setSelected(app);
+    setTier(app.tier ?? "S1");
     setNotes(app.reviewer_notes ?? "");
     const [{ data: docData }, { data: auditData }] = await Promise.all([
       supabase
@@ -311,35 +314,10 @@ const Admin = () => {
     if (newStatus !== selected.status && !window.confirm(`Status auf "${newStatus}" setzen?`)) return;
     setBusy(true);
     try {
-      const { error } = await supabase
-        .from("sentinel_applications")
-        .update({
-          status: newStatus,
-          reviewer_notes: notes,
-          reviewed_by: user.id,
-          reviewed_at: new Date().toISOString(),
-          kyc_status: (newStatus === "approved" ? "verified" : selected.kyc_status) as "verified" | "documents_uploaded" | "not_started" | "rejected",
-        })
-        .eq("id", selected.id);
-      if (error) throw error;
-
-      // Audit insert is part of the transaction: if it fails, revert the
-      // status change so an unlogged decision is never left half-applied.
-      const { error: auditErr } = await supabase.from("application_audit_log").insert({
-        application_id: selected.id,
-        actor_id: user.id,
-        action: "status_change",
-        from_status: selected.status,
-        to_status: newStatus,
-        notes,
+      const { error } = await supabase.rpc("review_sentinel_application", {
+        p_id: selected.id, p_status: newStatus, p_tier: tier, p_notes: notes,
       });
-      if (auditErr) {
-        await supabase
-          .from("sentinel_applications")
-          .update({ status: selected.status, kyc_status: selected.kyc_status as "rejected" | "not_started" | "documents_uploaded" | "verified", reviewer_notes: selected.reviewer_notes ?? null })
-          .eq("id", selected.id);
-        throw auditErr;
-      }
+      if (error) throw error;
 
       toast({ title: `Status: ${newStatus}` });
       setSelected(null);
@@ -629,7 +607,7 @@ const Admin = () => {
 
                 <div className="mt-6">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{t("admin.notes")}</p>
-                  <Textarea rows={4} className="mt-2" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} />
+                  <Textarea aria-label="Prüfnotizen" rows={4} className="mt-2" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} />
                 </div>
 
                 <div className="mt-6">
@@ -655,6 +633,13 @@ const Admin = () => {
                   )}
                 </div>
 
+                <div className="mt-6">
+                  <label htmlFor="review-tier" className="font-mono text-xs">Freigegebene Qualifikationsstufe</label>
+                  <select id="review-tier" className="mt-2 h-10 w-full border border-border bg-background px-3 text-sm" value={tier} disabled={busy} onChange={(e) => setTier(e.target.value)}>
+                    <option value="S1">S1 · Einstieg</option><option value="S2">S2 · Erfahren</option><option value="S3">S3 · Spezialisiert</option><option value="S4">S4 · Experte (Bestimmungsgutachten)</option>
+                  </select>
+                  <p className="mt-2 text-xs text-muted-foreground">Stufe anhand der geprüften Nachweise wählen. Sie wird zusammen mit der Entscheidung gespeichert.</p>
+                </div>
                 <div className="mt-6 flex flex-wrap gap-2">
                   <Button onClick={() => setStatus("under_review")} disabled={busy} variant="outline">
                     <Clock className="mr-2 h-4 w-4" /> {t("admin.setUnderReview")}

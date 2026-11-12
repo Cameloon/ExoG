@@ -47,12 +47,13 @@ const Account = () => {
     const { error } = await supabase
       .from("profiles")
       .update({ display_name: displayName.trim() || null })
-      .eq("id", user.id);
+      .eq("id", user.id).select("id").single();
     setSavingName(false);
     if (error) {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
       return;
     }
+    window.dispatchEvent(new Event("exog:profile-updated"));
     toast({ title: "Gespeichert" });
   };
 

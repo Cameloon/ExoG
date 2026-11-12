@@ -19,7 +19,7 @@ const Care = () => {
     return <PageLoader label="Lade Pflege" />;
   }
   if (!user) return <Navigate to="/auth" state={{ from: "/care" }} replace />;
-  if (role !== "sentinel" && role !== "einrichtung" && role !== "admin") {
+  if (role !== "sentinel" && role !== "einrichtung" && role !== "admin" && role !== "behoerde") {
     return <Navigate to="/sentinel" replace />;
   }
 

@@ -1,9 +1,10 @@
+import { AppAppearanceContext } from "@/hooks/app-appearance";
 // Auth-gated shell. Imported lazily from App.tsx so the ~90 kB gz Clerk
 // runtime is only fetched when a visitor actually hits an auth route —
 // public landing pages render without it.
 import { Suspense, lazy } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
-import { ClerkProvider } from "@clerk/clerk-react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { AuthenticateWithRedirectCallback, ClerkProvider } from "@clerk/clerk-react";
 import { AuthProvider } from "@/hooks/useAuth";
 import { useAuth } from "@/hooks/auth-context";
 import { EXTERNAL_CONFIG } from "@/config/external";
@@ -11,6 +12,7 @@ import { PageLoader } from "@/components/ui/loading-snake";
 import { V2_CSS } from "@/lib/v2Theme";
 import { useAccentTheme } from "@/hooks/useAccentTheme";
 
+const AccessOverview = lazy(() => import("./pages/AccessOverview.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const SentinelPath = lazy(() => import("./pages/SentinelPath.tsx"));
 const Pledge = lazy(() => import("./pages/Pledge.tsx"));
@@ -43,10 +45,11 @@ export const RequireAdmin = ({ children }: { children: React.ReactNode }) => {
 
 export const RequireAuth = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) {
     return <PageLoader label="Prüfe Zugang" />;
   }
-  if (!user) return <Navigate to="/auth" state={{ from: "/dashboard" }} replace />;
+  if (!user) return <Navigate to="/auth" state={{ from: location.pathname + location.search + location.hash }} replace />;
   return <>{children}</>;
 };
 
@@ -61,13 +64,14 @@ const DashboardHome = () => {
     einrichtung: "/shelters",
     sentinel: "/care",
   };
-  return <Navigate to={home[role] ?? "/sentinel"} replace />;
+  return home[role] ? <Navigate to={home[role]} replace /> : <AccessOverview />;
 };
 
 const AppShellRoot = () => {
   const { accent: acc } = useAccentTheme();
 
   return (
+    <AppAppearanceContext.Provider value={acc}>
     <div className="v2scope min-h-screen antialiased" data-acc={acc} data-app-v2>
       <style>{V2_CSS}</style>
       <ClerkProvider publishableKey={EXTERNAL_CONFIG.CLERK_PUBLISHABLE_KEY}>
@@ -83,6 +87,7 @@ const AppShellRoot = () => {
                 <Route path="/sentinel/apply" element={<RequireAuth><SentinelApply /></RequireAuth>} />
                 <Route path="/wards" element={<RequireAuth><Wards /></RequireAuth>} />
                 <Route path="/auth" element={<Auth />} />
+                <Route path="/sso-callback" element={<><PageLoader label="Anmeldung abschließen" /><AuthenticateWithRedirectCallback signInUrl="/auth" signUpUrl="/auth?mode=signup" signInFallbackRedirectUrl="/dashboard" signUpFallbackRedirectUrl="/dashboard" /></>} />
                 <Route path="/behoerde" element={<RequireAuth><Behoerde /></RequireAuth>} />
                 <Route path="/sentinels" element={<RequireAuth><BehoerdeNetwork /></RequireAuth>} />
                 <Route path="/behoerde/network" element={<RequireAuth><BehoerdeNetwork /></RequireAuth>} />
@@ -99,6 +104,7 @@ const AppShellRoot = () => {
         </AuthProvider>
       </ClerkProvider>
     </div>
+    </AppAppearanceContext.Provider>
   );
 };
 

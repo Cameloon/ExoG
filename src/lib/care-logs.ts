@@ -5,6 +5,7 @@ import type { Database } from "@/integrations/supabase/types";
 import type { CareLog, CaseRecord, SentinelProfile } from "./dashboard-data";
 import { fetchEnclosures, parseEnclosures } from "./enclosures";
 import { parseCapacity, totalCapacity } from "./habitats";
+import { intakeType } from "./animal-workflow";
 
 type Client = SupabaseClient<Database>;
 
@@ -17,6 +18,17 @@ export type WardRow = {
   age_estimate: string | null;
   region: string | null;
   status: string | null;
+  images: string[];
+  intake_type?: string;
+  origin_context?: string | null;
+  background?: string;
+  care_requirements?: string;
+  space_requirements?: string;
+  sex?: string | null;
+  size_estimate?: string | null;
+  urgency?: string;
+  placement_type?: "endstelle" | "pflegestelle";
+  legal_custody?: boolean;
 };
 
 const statusLabel: Record<string, string> = {
@@ -37,9 +49,19 @@ export function wardToCase(w: WardRow): CaseRecord {
     region: w.region ?? "—",
     authority: "—",
     age: w.age_estimate ?? "—",
-    risk: "stabil",
+    risk: w.urgency === "critical" ? "kritisch" : w.urgency === "urgent" ? "hoch" : "stabil",
     updated: "",
-    origin: "Behörde",
+    origin: ({ confiscated: "Behörde", found: "Fund", surrendered: "Abgabe", transferred: "Übernahme", unknown: "Ungeklärt" } as const)[intakeType(w.intake_type)],
+    wardId: w.id,
+    intakeType: intakeType(w.intake_type),
+    originContext: w.origin_context ?? "",
+    background: w.background,
+    careRequirements: w.care_requirements,
+    spaceRequirements: w.space_requirements,
+    sex: w.sex ?? "",
+    size: w.size_estimate ?? "",
+    placementType: w.placement_type,
+    legalCustody: w.legal_custody,
   };
 }
 
@@ -47,7 +69,7 @@ export async function fetchMyWards(client: Client, userId: string, page = 0, pag
   const from = page * pageSize;
   const { data, error } = await client
     .from("ward_listings")
-    .select("id, case_code, common_name, scientific_name, cites_listing, age_estimate, region, status")
+    .select("id, case_code, common_name, scientific_name, cites_listing, age_estimate, region, status, images, intake_type, origin_context, background, care_requirements, space_requirements, sex, size_estimate, urgency, placement_type, legal_custody")
     .eq("owner_id", userId)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
@@ -163,7 +185,7 @@ export async function fetchLiveSentinelProfile(
   fallbackEmail: string,
   wardCount: number,
 ): Promise<SentinelProfile> {
-  const { data } = await client
+  const { data, error } = await client
     .from("sentinel_applications")
     .select("full_name, email, region, capacity, tier, created_at, pledge_data")
     .eq("user_id", userId)
@@ -171,6 +193,7 @@ export async function fetchLiveSentinelProfile(
     .limit(1)
     .maybeSingle();
 
+  if (error) throw error;
   const app = data as {
     full_name: string;
     email: string;

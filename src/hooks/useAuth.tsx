@@ -67,13 +67,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [userLoaded, authLoaded, clerkUser, supabase]);
 
   // Fallback region from profiles table when admins assign region there instead of Clerk metadata.
+  const [profileName, setProfileName] = useState<string | null>(null);
+  const [profileRevision, setProfileRevision] = useState(0);
+  useEffect(() => {
+    const refresh = () => setProfileRevision((v) => v + 1);
+    window.addEventListener("exog:profile-updated", refresh);
+    return () => window.removeEventListener("exog:profile-updated", refresh);
+  }, []);
   const [profileRegion, setProfileRegion] = useState<string | null>(null);
   const [profileRegionLoading, setProfileRegionLoading] = useState(true);
 
   useEffect(() => {
     if (!userLoaded || !authLoaded) return;
     if (!clerkUser) {
-      setProfileRegion(null);
+      setProfileRegion(null); setProfileName(null);
       setProfileRegionLoading(false);
       return;
     }
@@ -81,17 +88,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setProfileRegionLoading(true);
     supabase
       .from("profiles")
-      .select("region")
+      .select("region, display_name")
       .eq("id", clerkUser.id)
       .maybeSingle()
       .then(({ data }) => {
         if (!cancelled) {
+          setProfileName(data?.display_name ?? null);
           setProfileRegion((data as { region: string } | null)?.region ?? null);
           setProfileRegionLoading(false);
         }
       });
     return () => { cancelled = true; };
-  }, [userLoaded, authLoaded, clerkUser, supabase]);
+  }, [userLoaded, authLoaded, clerkUser, supabase, profileRevision]);
 
   // A shelter user may be granted access via an admin-approved
   // pending_shelter_requests row (no manual Clerk role step required).
@@ -206,7 +214,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         id: clerkUser.id,
         email: clerkUser.primaryEmailAddress?.emailAddress ?? null,
         displayName:
-          clerkUser.fullName ??
+          profileName ?? clerkUser.fullName ??
           clerkUser.username ??
           clerkUser.primaryEmailAddress?.emailAddress ??
           null,
@@ -226,6 +234,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         await clerk.signOut();
       },
     };
-  }, [userLoaded, authLoaded, clerkUser, clerk, approvedShelter, sentinelApproved, sentinelTier, databaseAdmin, profileRegion, accessLoading, profileRegionLoading]);
+  }, [userLoaded, authLoaded, clerkUser, clerk, approvedShelter, sentinelApproved, sentinelTier, databaseAdmin, profileRegion, profileName, accessLoading, profileRegionLoading]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
