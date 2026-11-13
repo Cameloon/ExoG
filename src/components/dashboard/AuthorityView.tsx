@@ -40,19 +40,19 @@ export const AuthorityView = () => {
   return (
     <>
       {/* KPI strip */}
-      <div className="grid gap-px bg-border md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px bg-border md:grid-cols-4">
         {[
           { k: "12", l: "Aktive Akten", icon: FileText },
           { k: "3", l: "Kritisch · < 6 Std", icon: AlertTriangle, accent: true },
           { k: "4:12", l: "Ø Vermittlungszeit", icon: Clock },
           { k: "98 %", l: "Beweiskette intakt", icon: ShieldCheck },
         ].map((s) => (
-          <div key={s.l} className="bg-background p-6">
+          <div key={s.l} className="bg-background p-4 sm:p-6">
             <div className="flex items-start justify-between">
               <s.icon className={`h-4 w-4 ${s.accent ? "text-destructive" : "text-muted-foreground"}`} />
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">24h</span>
             </div>
-            <div className={`mt-6 font-display text-4xl tracking-tight ${s.accent ? "text-destructive" : ""}`}>{s.k}</div>
+            <div className={`mt-4 font-display text-4xl tracking-tight sm:mt-6 ${s.accent ? "text-destructive" : ""}`}>{s.k}</div>
             <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{s.l}</div>
           </div>
         ))}
@@ -145,7 +145,7 @@ export const AuthorityView = () => {
 
         {/* Detail panel */}
         <aside className="lg:col-span-5">
-          <div className="sticky top-24 border border-border bg-surface">
+          <div className="border border-border bg-surface lg:sticky lg:top-24">
             <div className="border-b border-border p-6">
               <div className="flex items-center justify-between">
                 <span className="case-tag">Akte</span>

@@ -34,19 +34,19 @@ export const AdminView = () => {
 
   return (
     <>
-      <div className="grid gap-px bg-border md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px bg-border md:grid-cols-4">
         {[
           { k: counts.pending, l: "Neu eingereicht", icon: AlertTriangle, accent: counts.pending > 0 },
           { k: counts.in_review, l: "In Prüfung", icon: Clock },
           { k: counts.approved, l: "Freigegeben (30d)", icon: ShieldCheck },
           { k: counts.rejected, l: "Abgelehnt (30d)", icon: XCircle },
         ].map((s) => (
-          <div key={s.l} className="bg-background p-6">
+          <div key={s.l} className="bg-background p-4 sm:p-6">
             <div className="flex items-start justify-between">
               <s.icon className={`h-4 w-4 ${s.accent ? "text-warning" : "text-muted-foreground"}`} />
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Queue</span>
             </div>
-            <div className={`mt-6 font-display text-4xl tracking-tight ${s.accent ? "text-warning" : ""}`}>{s.k}</div>
+            <div className={`mt-4 font-display text-4xl tracking-tight sm:mt-6 ${s.accent ? "text-warning" : ""}`}>{s.k}</div>
             <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{s.l}</div>
           </div>
         ))}
@@ -94,7 +94,7 @@ export const AdminView = () => {
 
         <aside className="lg:col-span-5">
           {active && (
-            <div className="sticky top-24 border border-border bg-surface">
+            <div className="border border-border bg-surface lg:sticky lg:top-24">
               <div className="border-b border-border p-6">
                 <span className="case-tag">Zertifizierungs-Antrag</span>
                 <h3 className="mt-4 font-mono text-lg text-primary">{active.id}</h3>

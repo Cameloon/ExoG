@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { LoadingSnake } from "@/components/ui/loading-snake";
 import { toast } from "@/hooks/use-toast";
-import { CheckCircle2, ChevronRight, FileText, XCircle, Clock, Eye } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ChevronRight, FileText, XCircle, Clock, Eye } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { HABITAT_CATEGORIES, parseCapacity, totalCapacity } from "@/lib/habitats";
 
@@ -71,6 +71,10 @@ const Admin = () => {
   const [filter, setFilter] = useState<Status | "all">("pending");
   const [apps, setApps] = useState<Application[]>([]);
   const [selected, setSelected] = useState<Application | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const detailRef = useRef<HTMLDivElement>(null);
+  const detailBackRef = useRef<HTMLButtonElement>(null);
+  const detailTriggerRef = useRef<HTMLButtonElement>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [preview, setPreview] = useState<{ url: string; mime: string } | null>(null);
   const [notes, setNotes] = useState("");
@@ -90,6 +94,7 @@ const Admin = () => {
   const [roleRole, setRoleRole] = useState("behoerde");
   const [roleRegion, setRoleRegion] = useState("");
   const [roleBusy, setRoleBusy] = useState(false);
+  const openAdminTasks = shelterReqs.filter((request) => request.status === "pending").length + changeReqs.length;
 
   const setUserRole = async () => {
     const uid = roleUserId.trim();
@@ -248,6 +253,13 @@ const Admin = () => {
     if (isAdmin) void loadChanges();
   }, [isAdmin, loadChanges]);
 
+  useEffect(() => {
+    if (mobileDetailOpen && window.matchMedia("(max-width: 1023px)").matches) {
+      detailRef.current?.scrollIntoView({ block: "start" });
+      detailBackRef.current?.focus({ preventScroll: true });
+    }
+  }, [mobileDetailOpen, selected?.id]);
+
   const decideShelter = async (id: string, status: "approved" | "rejected") => {
     if (!user) return;
     setShelterBusy(true);
@@ -266,10 +278,14 @@ const Admin = () => {
     }
   };
 
-  const openApp = async (app: Application) => {
+  const openApp = async (app: Application, trigger: HTMLButtonElement) => {
+    detailTriggerRef.current = trigger;
     setSelected(app);
+    setMobileDetailOpen(true);
     setTier(app.tier ?? "S1");
     setNotes(app.reviewer_notes ?? "");
+    setDocs([]);
+    setAudit([]);
     const [{ data: docData }, { data: auditData }] = await Promise.all([
       supabase
         .from("application_documents")
@@ -283,6 +299,11 @@ const Admin = () => {
     ]);
     setDocs((docData ?? []) as DocRow[]);
     setAudit((auditData ?? []) as AuditRow[]);
+  };
+
+  const closeMobileDetail = () => {
+    setMobileDetailOpen(false);
+    requestAnimationFrame(() => detailTriggerRef.current?.focus());
   };
 
   const openDoc = async (path: string, fileName?: string) => {
@@ -321,6 +342,7 @@ const Admin = () => {
 
       toast({ title: `Status: ${newStatus}` });
       setSelected(null);
+      setMobileDetailOpen(false);
       await load(true);
     } catch (e) {
       toast({ title: "Update failed", description: (e as Error).message, variant: "destructive" });
@@ -366,8 +388,13 @@ const Admin = () => {
         <h1 className="font-editorial mt-4 text-4xl md:text-5xl">{t("admin.title")}</h1>
         <p className="mt-3 text-muted-foreground">{t("admin.subtitle")}</p>
 
+        <details className="mt-8" open={openAdminTasks > 0}>
+          <summary className="cursor-pointer border border-border bg-surface px-6 py-4 font-mono text-xs uppercase tracking-[0.18em]">
+            Weitere Verwaltungsaufgaben <span className="ml-2 text-muted-foreground">· {openAdminTasks} offen</span>
+          </summary>
+          <div className="space-y-8 pt-4">
         {/* Shelter confirmation queue */}
-        <div className="mt-8 border border-border bg-surface p-6">
+        <div className="border border-border bg-surface p-6">
           <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
             Einrichtungen · Bestätigung
           </p>
@@ -395,7 +422,7 @@ const Admin = () => {
         </div>
 
         {/* Sentinel address-change queue */}
-        <div className="mt-8 border border-border bg-surface p-6">
+        <div className="border border-border bg-surface p-6">
           <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
             Sentinel · Adressänderungen
           </p>
@@ -427,7 +454,7 @@ const Admin = () => {
         </div>
 
         {/* Role & region management (Clerk publicMetadata via edge function) */}
-        <div className="mt-8 border border-border bg-surface p-6">
+        <div className="border border-border bg-surface p-6">
           <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
             Rollen &amp; Regionen
           </p>
@@ -436,12 +463,15 @@ const Admin = () => {
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Input
+              id="admin-role-user-id"
+              aria-label="Clerk User-ID"
               value={roleUserId}
               onChange={(e) => setRoleUserId(e.target.value)}
               placeholder="user_…"
               className="w-64 font-mono text-xs"
             />
             <select
+              aria-label="Rolle"
               value={roleRole}
               onChange={(e) => setRoleRole(e.target.value)}
               className="h-10 border border-border bg-background px-3 text-sm"
@@ -454,6 +484,7 @@ const Admin = () => {
             </select>
             {roleRole === "behoerde" && (
               <Input
+                aria-label="Zuständigkeitsregion"
                 value={roleRegion}
                 onChange={(e) => setRoleRegion(e.target.value)}
                 placeholder="Region, z.B. DE-Süd"
@@ -465,9 +496,12 @@ const Admin = () => {
             </Button>
           </div>
         </div>
+          </div>
+        </details>
 
         {/* Filter */}
-        <div className="mt-8 flex flex-wrap gap-2">
+        <h2 className="mt-8 text-xl tracking-tight">Sentinel-Anträge</h2>
+        <div className={`mt-4 flex flex-wrap gap-2 ${mobileDetailOpen ? "hidden lg:flex" : ""}`}>
           {([
             ["all", t("admin.filterAll")],
             ["pending", t("admin.pending")],
@@ -491,7 +525,7 @@ const Admin = () => {
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_1.2fr]">
           {/* List */}
-          <div className="border border-border bg-surface">
+          <div className={`border border-border bg-surface ${mobileDetailOpen ? "hidden lg:block" : ""}`}>
             {apps.length === 0 ? (
               <div className="p-8 text-center text-sm text-muted-foreground">{t("admin.noResults")}</div>
             ) : (
@@ -499,7 +533,8 @@ const Admin = () => {
                 {apps.map((a) => (
                   <li key={a.id}>
                     <button
-                      onClick={() => openApp(a)}
+                      onClick={(e) => void openApp(a, e.currentTarget)}
+                      aria-pressed={selected?.id === a.id}
                       className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-background ${
                         selected?.id === a.id ? "bg-background" : ""
                       }`}
@@ -529,13 +564,16 @@ const Admin = () => {
           </div>
 
           {/* Detail */}
-          <div className="border border-border bg-surface">
+          <div ref={detailRef} className={`scroll-mt-24 border border-border bg-surface ${mobileDetailOpen ? "" : "hidden lg:block"}`}>
             {!selected ? (
               <div className="p-8 text-center text-sm text-muted-foreground">
                 {t("admin.review")} →
               </div>
             ) : (
               <div className="p-6 md:p-8">
+                <Button ref={detailBackRef} variant="ghost" size="sm" className="mb-4 lg:hidden" onClick={closeMobileDetail}>
+                  <ArrowLeft className="mr-2 h-4 w-4" /> Alle Bewerbungen
+                </Button>
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">

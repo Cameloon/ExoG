@@ -6,7 +6,7 @@ import { DocumentsHub } from "@/components/dashboard/DocumentsHub";
 import { fetchCareLogPage, wardToCase, type CareLogCursor } from "@/lib/care-logs";
 import { fetchSentinels, type NetworkSentinel } from "@/lib/sentinel-directory";
 import { fetchWardAssignmentRequestsForWard, requestWardAssignment, type WardAssignmentRequest } from "@/lib/ward-assignment-requests";
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useExternalSupabase } from "@/integrations/external/supabase";
 import { useAuth } from "@/hooks/auth-context";
@@ -21,7 +21,7 @@ import { fetchMyShelter, fetchShelters, fetchWardsByRegion } from "@/lib/shelter
 import type { CareLog } from "@/lib/dashboard-data";
 import type { Shelter, Ward } from "@/lib/types";
 import {
-  AlertTriangle, ChevronRight, Clock, FileText, MapPin, ShieldCheck,
+  AlertTriangle, ChevronLeft, ChevronRight, Clock, FileText, MapPin, ShieldCheck,
   Activity, Building2, Map as MapIcon, List as ListIcon,
   Truck,
 } from "lucide-react";
@@ -115,6 +115,10 @@ const Behoerde = () => {
   const [labError, setLabError] = useState(false);
   const [transportsError, setTransportsError] = useState(false);
   const [showMap, setShowMap] = useState(false);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const detailRef = useRef<HTMLDivElement>(null);
+  const detailBackRef = useRef<HTMLButtonElement>(null);
+  const detailTriggerRef = useRef<HTMLButtonElement>(null);
 
   // ponytail: sentinel assignment
   const [sentinels, setSentinels] = useState<NetworkSentinel[]>([]);
@@ -191,10 +195,16 @@ const Behoerde = () => {
     } finally { setAssigning(false); }
   };
 
-  const selectWard = (w: Ward) => {
+  const selectWard = (w: Ward, trigger: HTMLButtonElement) => {
     if (documentDirty && !window.confirm("Nicht heruntergeladene Dokumentangaben verwerfen?")) return;
+    detailTriggerRef.current = trigger;
     setDocumentDirty(false); setSelected(w); setDetailTab("chain"); setLogCursors([null]);
+    setMobileDetailOpen(true);
     setAssignTo(""); setSelSentinelId(null);
+  };
+  const closeMobileDetail = () => {
+    setMobileDetailOpen(false);
+    requestAnimationFrame(() => detailTriggerRef.current?.focus());
   };
   const selectedWard = wards.find((w) => w.id === selected?.id) ?? wards[0] ?? null;
   const selectedId = selectedWard?.id;
@@ -202,6 +212,12 @@ const Behoerde = () => {
     .map(({ sentinel, coordinates }) => ({ sentinel, distanceKm: distanceKm(originCoordinates, coordinates) }))
     .filter((candidate) => candidate.distanceKm <= radiusKm)
     .sort((a, b) => a.distanceKm - b.distanceKm), [locatedSentinels, originCoordinates, radiusKm]);
+  useEffect(() => {
+    if (mobileDetailOpen && window.matchMedia("(max-width: 1023px)").matches) {
+      detailRef.current?.scrollIntoView({ block: "start" });
+      detailBackRef.current?.focus({ preventScroll: true });
+    }
+  }, [mobileDetailOpen, selectedId]);
   useEffect(() => {
     if (sentinels.length === 0 || !originCoordinates) { setLocatedSentinels([]); setNearbyLoading(false); return; }
     const controller = new AbortController();
@@ -302,18 +318,18 @@ const Behoerde = () => {
   }, [wards]);
 
   const renderKpi = () => (
-    <div className="grid gap-px bg-border md:grid-cols-4">
+    <div className="grid grid-cols-2 gap-px bg-border md:grid-cols-4">
       {[
         { k: String(activeCount), l: "Aktive Wards", icon: FileText },
         { k: String(criticalCount), l: "Kritisch · hohe Dringlichkeit", icon: AlertTriangle, accent: true },
         { k: String(shelters.length), l: "Einrichtungen in der Region", icon: Building2 },
         { k: String(sentinels.length), l: "Freigegebene Sentinels bundesweit", icon: ShieldCheck },
       ].map((s) => (
-        <div key={s.l} className="bg-background p-6">
+        <div key={s.l} className="bg-background p-4 sm:p-6">
           <div className="flex items-start justify-between">
             <s.icon className={`h-4 w-4 ${s.accent ? "text-destructive" : "text-muted-foreground"}`} />
           </div>
-          <div className={`mt-6 font-display text-4xl tracking-tight ${s.accent ? "text-destructive" : ""}`}>{s.k}</div>
+          <div className={`mt-4 font-display text-4xl tracking-tight sm:mt-6 ${s.accent ? "text-destructive" : ""}`}>{s.k}</div>
           <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{s.l}</div>
         </div>
       ))}
@@ -426,7 +442,7 @@ const Behoerde = () => {
 
                 <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-12">
                   {/* Ward list */}
-                  <section className="min-w-0 lg:col-span-7">
+                  <section className={`min-w-0 lg:col-span-7 ${mobileDetailOpen ? "hidden lg:block" : ""}`}>
                     <h2 className="text-xl tracking-tight">Wards in der Region</h2>
 
                     <div className="mt-4 flex flex-wrap gap-px bg-border">
@@ -448,7 +464,7 @@ const Behoerde = () => {
                         <div />
                       </div>
                       {filtered.map((w) => (
-                        <button key={w.id} onClick={() => selectWard(w)}
+                        <button key={w.id} onClick={(e) => selectWard(w, e.currentTarget)} aria-pressed={sel?.id === w.id}
                           className={`flex w-full items-start justify-between gap-3 border-b border-border px-4 py-4 text-left transition-colors last:border-b-0 hover:bg-surface-elevated ${
                             sel?.id === w.id ? "bg-surface-elevated" : ""
                           }`}
@@ -494,10 +510,13 @@ const Behoerde = () => {
                   </section>
 
                   {/* Detail panel */}
-                  <aside className="min-w-0 lg:col-span-5">
+                  <aside className={`min-w-0 lg:col-span-5 ${mobileDetailOpen ? "" : "hidden lg:block"}`}>
                     {sel && (
-                      <div className="sticky top-24 border border-border bg-surface">
+                      <div ref={detailRef} className="scroll-mt-24 border border-border bg-surface lg:sticky lg:top-24">
                         <div className="border-b border-border p-6">
+                          <Button ref={detailBackRef} variant="ghost" size="sm" className="mb-4 lg:hidden" onClick={closeMobileDetail}>
+                            <ChevronLeft className="mr-2 h-4 w-4" /> Alle Wards
+                          </Button>
                           <div className="flex items-center justify-between">
                             <span className="case-tag">Ward</span>
                             <span className={`font-mono text-[11px] uppercase ${urgencyColor[sel.urgency] ?? ""}`}>● {urgencyLabel[sel.urgency] ?? sel.urgency}</span>

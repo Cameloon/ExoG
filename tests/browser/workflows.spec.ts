@@ -64,7 +64,7 @@ for (const [role, path, title] of [
 ] as const) {
   test(`${role}: dashboard, navigation and mobile reflow`, async ({ page }) => {
     const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
-    await setup(page, role); await page.goto(path);
+    await setup(page, role); await page.emulateMedia({ reducedMotion: "reduce" }); await page.goto(path);
     await expect(page.locator("h1")).toContainText(title);
     await expect(page.getByRole("button", { name: "Menü öffnen" })).toBeVisible();
     await page.getByRole("button", { name: "Menü öffnen" }).click();
@@ -75,6 +75,10 @@ for (const [role, path, title] of [
     const overflow = await page.evaluate(() => [...document.querySelectorAll("main *")].filter((el) => el.getBoundingClientRect().right > innerWidth + 1).slice(0, 12).map((el) => ({ tag: el.tagName, class: el.className, right: el.getBoundingClientRect().right })));
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), JSON.stringify(overflow)).toBeTruthy();
     await page.screenshot({ path: `test-results/ux/${role}-mobile.png`, fullPage: true });
+    for (const width of [768, 1024]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${role} overflows at ${width}px`).toBeTruthy();
+    }
     await page.setViewportSize({ width: 1536, height: 1000 });
     await expect(page.getByRole("navigation", { name: "Hauptnavigation", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Switch to light mode" }).click();
@@ -83,6 +87,52 @@ for (const [role, path, title] of [
     expect(errors).toEqual([]);
   });
 }
+
+test("authority triage uses a mobile list-detail flow", async ({ page }) => {
+  await setup(page, "behoerde");
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/behoerde");
+  const wardRow = page.getByRole("button").filter({ hasText: "Test-Bartagame" }).first();
+  await wardRow.click();
+  await expect(page.getByRole("button", { name: "Alle Wards" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Alle Wards" })).toBeFocused();
+  await expect(wardRow).toBeHidden();
+  await page.screenshot({ path: "test-results/ux/behoerde-detail-mobile.png", fullPage: true });
+  await page.getByRole("button", { name: "Alle Wards" }).click();
+  await expect(wardRow).toBeVisible();
+  await expect(wardRow).toBeFocused();
+});
+
+test("admin starts at application review and opens details as a mobile screen", async ({ page }) => {
+  await setup(page, "admin");
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/admin");
+  await expect(page.getByRole("heading", { name: "Sentinel-Anträge" })).toBeVisible();
+  await expect(page.getByLabel("Rolle")).toBeHidden();
+  await page.getByText(/Weitere Verwaltungsaufgaben/).click();
+  await expect(page.getByLabel("Rolle")).toBeVisible();
+  await page.getByText(/Weitere Verwaltungsaufgaben/).click();
+  const application = page.getByRole("button", { name: /Test Person/ }).first();
+  await application.click();
+  await expect(page.getByRole("heading", { name: "Test Person", level: 2 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Alle Bewerbungen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Alle Bewerbungen" })).toBeFocused();
+  await expect(application).toBeHidden();
+  await page.screenshot({ path: "test-results/ux/admin-detail-mobile.png", fullPage: true });
+  await page.getByRole("button", { name: "Alle Bewerbungen" }).click();
+  await expect(application).toBeVisible();
+  await expect(application).toBeFocused();
+});
+
+test("approved animal workspace opens directly on its inventory", async ({ page }) => {
+  await setup(page, "sentinel");
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/wards");
+  await expect(page.getByRole("heading", { name: "Tiere", level: 1 })).toBeVisible();
+  await expect(page.getByText("Dies ist kein Marktplatz", { exact: false })).toHaveCount(0);
+  await expect(page.getByRole("searchbox", { name: "Wards durchsuchen" })).toBeVisible();
+  await page.screenshot({ path: "test-results/ux/wards-workspace-mobile.png", fullPage: true });
+});
 
 test("care outage never shows demo profile and offers retry", async ({ page }) => {
   await setup(page, "sentinel", "ward_listings"); await page.goto("/care");

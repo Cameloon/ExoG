@@ -485,8 +485,8 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
   return (
     <>
       {/* Sentinel-Profil-Strip */}
-      <div className="grid gap-px bg-border md:grid-cols-4">
-        <div className="bg-background p-6">
+      <div className="grid grid-cols-2 gap-px bg-border md:grid-cols-4">
+        <div className="bg-background p-4 sm:p-6">
           <div className="flex items-start justify-between">
             <PawPrint className="h-4 w-4 text-muted-foreground" />
             {!live && (
@@ -495,19 +495,19 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
               </span>
             )}
           </div>
-          <div className="mt-6 font-display text-2xl tracking-tight">{sentinel.name}</div>
+          <div className="mt-4 font-display text-2xl tracking-tight sm:mt-6">{sentinel.name}</div>
           <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             {live && role !== "sentinel" ? "Pflegebereich" : "Sentinel"} · Region {sentinel.region}
           </div>
         </div>
-        <div className="bg-background p-6">
+        <div className="bg-background p-4 sm:p-6">
           <div className="flex items-start justify-between">
             <ShieldCheck className="h-4 w-4 text-muted-foreground" />
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               Kapazität
             </span>
           </div>
-          <div className="mt-6 font-display text-4xl tracking-tight">
+          <div className="mt-4 font-display text-4xl tracking-tight sm:mt-6">
             {cap.used}
             <span className="text-muted-foreground">/{cap.total}</span>
           </div>
@@ -515,26 +515,26 @@ export const SentinelView = ({ live = false }: { live?: boolean }) => {
             <div className="h-full bg-primary" style={{ width: `${capPct}%` }} />
           </div>
         </div>
-        <div className="bg-background p-6">
+        <div className="bg-background p-4 sm:p-6">
           <div className="flex items-start justify-between">
             <CalendarClock className="h-4 w-4 text-muted-foreground" />
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               {live ? "Meine Wards" : "Nächste Pflicht"}
             </span>
           </div>
-          <div className="mt-6 font-display text-2xl tracking-tight">{live ? wards.length : "14:00"}</div>
+          <div className="mt-4 font-display text-2xl tracking-tight sm:mt-6">{live ? wards.length : "14:00"}</div>
           <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             {live ? "in eigener Pflege" : "Vet-Telefonat · EG-2026-00466"}
           </div>
         </div>
-        <div className="bg-background p-6">
+        <div className="bg-background p-4 sm:p-6">
           <div className="flex items-start justify-between">
             <Activity className="h-4 w-4 text-muted-foreground" />
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               7-Tage-Logs
             </span>
           </div>
-          <div className="mt-6 font-display text-4xl tracking-tight">{live ? logCount7d : 42}</div>
+          <div className="mt-4 font-display text-4xl tracking-tight sm:mt-6">{live ? logCount7d : 42}</div>
           <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             Einträge erfasst
           </div>

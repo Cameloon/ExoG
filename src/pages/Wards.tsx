@@ -574,7 +574,10 @@ const Wards = () => {
   return (
     <div className="min-h-screen bg-background">
       <SiteHeader />
-      <main className="container py-16 lg:py-24">
+      <main className={`container ${user ? "py-8" : "py-16 lg:py-24"}`}>
+        {user ? (
+          <h1 className="font-editorial text-4xl leading-tight md:text-5xl">Tiere</h1>
+        ) : (
         <div className="max-w-3xl">
           <span className="eyebrow">§ Wards · Vetted Disclosure</span>
           <h1 className="font-editorial mt-4 text-5xl leading-[1.02] md:text-6xl">
@@ -594,8 +597,9 @@ const Wards = () => {
             <span className="border border-border px-3 py-1.5">Reversibel</span>
           </div>
         </div>
+        )}
 
-        <div className="mt-16">
+        <div className={user ? "mt-6" : "mt-16"}>
           {access.kind === "loading" && (
             <div className="flex justify-center">
               <LoadingSnake label="Prüfe Zugang" compact />
